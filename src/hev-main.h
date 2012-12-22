@@ -11,5 +11,7 @@
 #ifndef __HEV_MAIN_H__
 #define __HEV_MAIN_H__
 
+#include <gio/gio.h>
+
 #endif /* __HEV_MAIN_H__ */
 
