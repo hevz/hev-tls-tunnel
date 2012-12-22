@@ -83,7 +83,8 @@ main (int argc, char *argv[])
         g_critical ("Parse options failed!");
         goto option_fail;
     }
-    if (!mode) {
+    if (!mode || (!g_str_equal (mode, "server") &&
+                !g_str_equal (mode, "client"))) {
         gchar *help = g_option_context_get_help (context, TRUE, NULL);
         g_fprintf (stderr, "%s", help);
         g_free (help);
