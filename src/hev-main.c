@@ -24,13 +24,13 @@ static gint server_port = 0;
 static gchar *local_addr = NULL;
 static gchar *local_port = 0;
 
-static GOptionEntry main_entries[] =
+static const GOptionEntry main_entries[] =
 {
     { "mode", 'm', 0, G_OPTION_ARG_STRING, &mode, "Work mode", "server|client" },
     { NULL }
 };
 
-static GOptionEntry server_entries[] =
+static const GOptionEntry server_entries[] =
 {
     { "target-addr", 't', 0, G_OPTION_ARG_STRING, &target_addr,
         "Target address", NULL },
@@ -43,7 +43,7 @@ static GOptionEntry server_entries[] =
     { NULL }
 };
 
-static GOptionEntry client_entries[] =
+static const GOptionEntry client_entries[] =
 {
     { "server-addr", 's', 0, G_OPTION_ARG_STRING, &server_addr,
         "Server address", NULL },
