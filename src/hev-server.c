@@ -213,7 +213,7 @@ hev_server_class_init (HevServerClass *klass)
                     G_PARAM_CONSTRUCT_ONLY);
     hev_server_properties[PROP_LISTEN_ADDR] =
         g_param_spec_string ("listen-addr",
-                    "Listen addr", "Listen addr",
+                    "listen addr", "Listen addr",
                     "0.0.0.0",
                     G_PARAM_READWRITE |
                     G_PARAM_CONSTRUCT_ONLY);

@@ -183,7 +183,7 @@ hev_client_class_init (HevClientClass *klass)
                     G_PARAM_CONSTRUCT_ONLY);
     hev_client_properties[PROP_LOCAL_ADDR] =
         g_param_spec_string ("local-addr",
-                    "Local addr", "Local addr",
+                    "local addr", "Local addr",
                     "0.0.0.0",
                     G_PARAM_READWRITE |
                     G_PARAM_CONSTRUCT_ONLY);
