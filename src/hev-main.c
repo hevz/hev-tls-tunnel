@@ -11,6 +11,7 @@
 #include <glib/gprintf.h>
 
 #include "hev-main.h"
+#include "hev-server.h"
 
 static gchar *mode = NULL;
 
@@ -23,6 +24,8 @@ static gchar *server_addr = NULL;
 static gint server_port = 0;
 static gchar *local_addr = NULL;
 static gint local_port = 0;
+
+static GObject *worker = NULL;
 
 static const GOptionEntry main_entries[] =
 {
@@ -56,6 +59,22 @@ static const GOptionEntry client_entries[] =
     { NULL }
 };
 
+static void
+hev_server_new_async_handler (GObject *source_object,
+            GAsyncResult *res, gpointer user_data)
+{
+    HevServer *server = NULL;
+    GError *error = NULL;
+
+    server = hev_server_new_finish (res, &error);
+    if (!server) {
+        g_critical ("Create server failed: %s", error->message);
+        g_clear_error (&error);
+    }
+
+    worker = G_OBJECT (server);
+}
+
 int
 main (int argc, char *argv[])
 {
@@ -64,6 +83,8 @@ main (int argc, char *argv[])
     GOptionGroup *srv_grp = NULL;
     GOptionGroup *cli_grp = NULL;
     GError *error = NULL;
+
+    g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
 
     g_type_init ();
 
@@ -89,7 +110,7 @@ main (int argc, char *argv[])
         g_fprintf (stderr, "%s", help);
         g_free (help);
 
-        goto option_fail;
+        goto option_chk_fail;
     }
     if (g_str_equal (mode, "server") &&
                 (!target_addr || !listen_addr)) {
@@ -97,7 +118,7 @@ main (int argc, char *argv[])
         g_fprintf (stderr, "%s", help);
         g_free (help);
 
-        goto option_fail;
+        goto option_chk_fail;
     }
     if (g_str_equal (mode, "client") &&
                 (!server_addr || !listen_addr)) {
@@ -105,7 +126,7 @@ main (int argc, char *argv[])
         g_fprintf (stderr, "%s", help);
         g_free (help);
 
-        goto option_fail;
+        goto option_chk_fail;
     }
     g_option_context_free (context);
 
@@ -115,13 +136,35 @@ main (int argc, char *argv[])
         goto main_loop_fail;
     }
 
+    /* Create worker */
+    if (g_str_equal (mode, "server")) {
+        hev_server_new_async (target_addr, target_port,
+                    listen_addr, listen_port, NULL,
+                    hev_server_new_async_handler,
+                    NULL);
+    } else if (g_str_equal (mode, "client")) {
+    }
+
     g_main_loop_run (main_loop);
 
+    if (worker)
+      g_object_unref (worker);
     g_main_loop_unref (main_loop);
+    g_free (mode);
+    g_free (target_addr);
+    g_free (listen_addr);
+    g_free (server_addr);
+    g_free (local_addr);
 
     return 0;
 
 main_loop_fail:
+option_chk_fail:
+    g_free (mode);
+    g_free (target_addr);
+    g_free (listen_addr);
+    g_free (server_addr);
+    g_free (local_addr);
 option_fail:
     
     return -1;
