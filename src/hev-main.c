@@ -80,6 +80,7 @@ hev_server_new_async_handler (GObject *source_object,
     }
 
     worker = G_OBJECT (server);
+    hev_server_start (server);
 }
 
 static void
@@ -175,8 +176,13 @@ main (int argc, char *argv[])
 
     g_main_loop_run (main_loop);
 
-    if (worker)
-      g_object_unref (worker);
+    if (worker) {
+        if (g_str_equal (mode, "server")) {
+            hev_server_stop (HEV_SERVER (worker));
+        } else if (g_str_equal (mode, "client")) {
+        }
+        g_object_unref (worker);
+    }
     g_main_loop_unref (main_loop);
     g_free (mode);
     g_free (target_addr);
