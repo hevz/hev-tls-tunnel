@@ -12,6 +12,7 @@
 
 #include "hev-main.h"
 #include "hev-server.h"
+#include "hev-client.h"
 
 static gchar *mode = NULL;
 
@@ -73,6 +74,22 @@ hev_server_new_async_handler (GObject *source_object,
     }
 
     worker = G_OBJECT (server);
+}
+
+static void
+hev_client_new_async_handler (GObject *source_object,
+            GAsyncResult *res, gpointer user_data)
+{
+    HevClient *client = NULL;
+    GError *error = NULL;
+
+    client = hev_client_new_finish (res, &error);
+    if (!client) {
+        g_critical ("Create client failed: %s", error->message);
+        g_clear_error (&error);
+    }
+
+    worker = G_OBJECT (client);
 }
 
 int
@@ -143,6 +160,10 @@ main (int argc, char *argv[])
                     hev_server_new_async_handler,
                     NULL);
     } else if (g_str_equal (mode, "client")) {
+        hev_client_new_async (target_addr, target_port,
+                    local_addr, local_port, NULL,
+                    hev_client_new_async_handler,
+                    NULL);
     }
 
     g_main_loop_run (main_loop);
