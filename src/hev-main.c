@@ -17,12 +17,12 @@ static gchar *mode = NULL;
 static gchar *target_addr = NULL;
 static gint target_port = 0;
 static gchar *listen_addr = NULL;
-static gchar *listen_port = 0;
+static gint listen_port = 0;
 
 static gchar *server_addr = NULL;
 static gint server_port = 0;
 static gchar *local_addr = NULL;
-static gchar *local_port = 0;
+static gint local_port = 0;
 
 static const GOptionEntry main_entries[] =
 {
