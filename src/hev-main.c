@@ -145,7 +145,7 @@ main (int argc, char *argv[])
         goto option_chk_fail;
     }
     if (g_str_equal (mode, "client") &&
-                (!server_addr || !listen_addr)) {
+                (!server_addr || !local_addr)) {
         gchar *help = g_option_context_get_help (context, FALSE, cli_grp);
         g_fprintf (stderr, "%s", help);
         g_free (help);
@@ -168,7 +168,7 @@ main (int argc, char *argv[])
                     hev_server_new_async_handler,
                     NULL);
     } else if (g_str_equal (mode, "client")) {
-        hev_client_new_async (target_addr, target_port,
+        hev_client_new_async (server_addr, server_port,
                     local_addr, local_port, NULL,
                     hev_client_new_async_handler,
                     NULL);

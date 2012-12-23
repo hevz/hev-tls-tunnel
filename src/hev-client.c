@@ -15,8 +15,8 @@
 enum
 {
     PROP_ZERO,
-    PROP_TARGET_ADDR,
-    PROP_TARGET_PORT,
+    PROP_SERVER_ADDR,
+    PROP_SERVER_PORT,
     PROP_LOCAL_ADDR,
     PROP_LOCAL_PORT,
     N_PROPERTIES
@@ -26,8 +26,8 @@ typedef struct _HevClientPrivate HevClientPrivate;
 
 struct _HevClientPrivate
 {
-    gchar *target_addr;
-    gint target_port;
+    gchar *server_addr;
+    gint server_port;
     gchar *local_addr;
     gint local_port;
 };
@@ -63,9 +63,9 @@ hev_client_finalize (GObject *obj)
 
     g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
 
-    if (priv->target_addr) {
-        g_free (priv->target_addr);
-        priv->target_addr = NULL;
+    if (priv->server_addr) {
+        g_free (priv->server_addr);
+        priv->server_addr = NULL;
     }
 
     if (priv->local_addr) {
@@ -104,11 +104,11 @@ hev_client_get_property (GObject *obj, guint id,
     g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
 
     switch (id) {
-    case PROP_TARGET_ADDR:
-        g_value_set_string (value, priv->target_addr);
+    case PROP_SERVER_ADDR:
+        g_value_set_string (value, priv->server_addr);
         break;
-    case PROP_TARGET_PORT:
-        g_value_set_int (value, priv->target_port);
+    case PROP_SERVER_PORT:
+        g_value_set_int (value, priv->server_port);
         break;
     case PROP_LOCAL_ADDR:
         g_value_set_string (value, priv->local_addr);
@@ -132,13 +132,13 @@ hev_client_set_property (GObject *obj, guint id,
     g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
 
     switch (id) {
-    case PROP_TARGET_ADDR:
-        if (priv->target_addr)
-          g_free (priv->target_addr);
-        priv->target_addr = g_strdup (g_value_get_string (value));
+    case PROP_SERVER_ADDR:
+        if (priv->server_addr)
+          g_free (priv->server_addr);
+        priv->server_addr = g_strdup (g_value_get_string (value));
         break;
-    case PROP_TARGET_PORT:
-        priv->target_port = g_value_get_int (value);
+    case PROP_SERVER_PORT:
+        priv->server_port = g_value_get_int (value);
         break;
     case PROP_LOCAL_ADDR:
         if (priv->local_addr)
@@ -169,15 +169,15 @@ hev_client_class_init (HevClientClass *klass)
     obj_class->finalize = hev_client_finalize;
 
     /* Properties */
-    hev_client_properties[PROP_TARGET_ADDR] =
-        g_param_spec_string ("target-addr",
-                    "target addr", "Target addr",
+    hev_client_properties[PROP_SERVER_ADDR] =
+        g_param_spec_string ("server-addr",
+                    "server addr", "Server addr",
                     "127.0.0.1",
                     G_PARAM_READWRITE |
                     G_PARAM_CONSTRUCT_ONLY);
-    hev_client_properties[PROP_TARGET_PORT] =
-        g_param_spec_int ("target-port",
-                    "target port", "Target port",
+    hev_client_properties[PROP_SERVER_PORT] =
+        g_param_spec_int ("server-port",
+                    "server port", "Server port",
                     0, G_MAXUINT16, 22,
                     G_PARAM_READWRITE |
                     G_PARAM_CONSTRUCT_ONLY);
@@ -215,8 +215,8 @@ hev_client_init (HevClient *self)
 
     g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
 
-    priv->target_addr = g_strdup ("127.0.0.1");
-    priv->target_port = 22;
+    priv->server_addr = g_strdup ("127.0.0.1");
+    priv->server_port = 22;
     priv->local_addr = g_strdup ("0.0.0.0");
     priv->local_port = 6000;
 }
@@ -264,7 +264,7 @@ hev_client_async_initable_init_finish (GAsyncInitable *initable,
 }
 
 void
-hev_client_new_async (gchar *target_addr, gint target_port,
+hev_client_new_async (gchar *server_addr, gint server_port,
             gchar *local_addr, gint local_port,
             GCancellable *cancellable, GAsyncReadyCallback callback,
             gpointer user_data)
@@ -273,8 +273,8 @@ hev_client_new_async (gchar *target_addr, gint target_port,
 
     g_async_initable_new_async (HEV_TYPE_CLIENT, G_PRIORITY_DEFAULT,
                 cancellable, callback, user_data,
-                "target-addr", target_addr,
-                "target-port", target_port,
+                "server-addr", server_addr,
+                "server-port", server_port,
                 "local-addr", local_addr,
                 "local-port", local_port,
                 NULL);

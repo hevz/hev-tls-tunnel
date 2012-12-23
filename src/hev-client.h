@@ -37,7 +37,7 @@ struct _HevClientClass
 
 GType hev_client_get_type (void);
 
-void hev_client_new_async (gchar *target_addr, gint target_port,
+void hev_client_new_async (gchar *server_addr, gint server_port,
             gchar *listen_addr, gint listen_port,
             GCancellable *cancellable, GAsyncReadyCallback callback,
             gpointer user_data);
