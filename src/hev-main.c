@@ -97,6 +97,7 @@ hev_client_new_async_handler (GObject *source_object,
     }
 
     worker = G_OBJECT (client);
+    hev_client_start (client);
 }
 
 int
@@ -177,10 +178,10 @@ main (int argc, char *argv[])
     g_main_loop_run (main_loop);
 
     if (worker) {
-        if (g_str_equal (mode, "server")) {
-            hev_server_stop (HEV_SERVER (worker));
-        } else if (g_str_equal (mode, "client")) {
-        }
+        if (HEV_IS_SERVER (worker))
+          hev_server_stop (HEV_SERVER (worker));
+        if (HEV_IS_CLIENT (worker))
+          hev_client_stop (HEV_CLIENT (worker));
         g_object_unref (worker);
     }
     g_main_loop_unref (main_loop);

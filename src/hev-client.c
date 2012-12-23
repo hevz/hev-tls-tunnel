@@ -23,6 +23,7 @@ enum
 };
 
 typedef struct _HevClientPrivate HevClientPrivate;
+typedef struct _HevClientClientData HevClientClientData;
 
 struct _HevClientPrivate
 {
@@ -30,6 +31,14 @@ struct _HevClientPrivate
     gint server_port;
     gchar *local_addr;
     gint local_port;
+
+    GSocketService *service;
+};
+
+struct _HevClientClientData
+{
+    GIOStream *tls_stream;
+    GIOStream *lcl_stream;
 };
 
 static void hev_client_async_initable_iface_init (GAsyncInitableIface *iface);
@@ -38,11 +47,26 @@ static void hev_client_async_initable_init_async (GAsyncInitable *initable,
             GAsyncReadyCallback callback, gpointer user_data);
 static gboolean hev_client_async_initable_init_finish (GAsyncInitable *initable,
             GAsyncResult *result, GError **error);
+static gboolean socket_service_incoming_handler (GSocketService *service,
+            GSocketConnection *connection, GObject *source_object,
+            gpointer user_data);
+static void socket_client_connect_to_host_async_handler (GObject *source_object,
+            GAsyncResult *res, gpointer user_data);
+static void io_stream_splice_async_handler (GObject *source_object,
+            GAsyncResult *res, gpointer user_data);
+static void io_stream_close_async_handler (GObject *source_object,
+            GAsyncResult *res, gpointer user_data);
 
 static GParamSpec *hev_client_properties[N_PROPERTIES] = { NULL };
 
 G_DEFINE_TYPE_WITH_CODE (HevClient, hev_client, G_TYPE_OBJECT,
         G_IMPLEMENT_INTERFACE (G_TYPE_ASYNC_INITABLE, hev_client_async_initable_iface_init));
+
+GQuark
+hev_client_error_quark (void)
+{
+    return g_quark_from_static_string ("hev-client-error-quark");
+}
 
 static void
 hev_client_dispose (GObject *obj)
@@ -51,6 +75,14 @@ hev_client_dispose (GObject *obj)
     HevClientPrivate *priv = HEV_CLIENT_GET_PRIVATE (self);
 
     g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
+
+    if (priv->service) {
+        g_signal_handlers_disconnect_by_func (priv->service,
+                    G_CALLBACK (socket_service_incoming_handler),
+                    self);
+        g_object_unref (priv->service);
+        priv->service = NULL;
+    }
 
     G_OBJECT_CLASS (hev_client_parent_class)->dispose (obj);
 }
@@ -225,7 +257,50 @@ static void
 async_result_run_in_thread_handler (GSimpleAsyncResult *simple,
             GObject *object, GCancellable *cancellable)
 {
+    HevClient *self = HEV_CLIENT (object);
+    HevClientPrivate *priv = HEV_CLIENT_GET_PRIVATE (self);
+    GInetAddress *iaddr = NULL;
+    GSocketAddress *saddr = NULL;
+    GError *error = NULL;
+
     g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
+
+    priv->service = g_socket_service_new ();
+    if (!priv->service) {
+        g_simple_async_result_set_error (simple,
+                    HEV_CLIENT_ERROR,
+                    HEV_CLIENT_ERROR_SERVICE,
+                    "Create socket service failed!");
+        goto service_fail;
+    }
+
+    iaddr = g_inet_address_new_from_string (priv->local_addr);
+    saddr = g_inet_socket_address_new (iaddr, priv->local_port);
+
+    if (!g_socket_listener_add_address (G_SOCKET_LISTENER (priv->service),
+                saddr, G_SOCKET_TYPE_STREAM,
+                G_SOCKET_PROTOCOL_TCP, NULL,
+                NULL, &error)) {
+        g_simple_async_result_take_error (simple, error);
+        goto add_addr_fail;
+    }
+
+    g_object_unref (saddr);
+    g_object_unref (iaddr);
+
+    g_signal_connect (priv->service, "incoming",
+                G_CALLBACK (socket_service_incoming_handler),
+                self);
+
+    return;
+
+add_addr_fail:
+    g_object_unref (saddr);
+    g_object_unref (iaddr);
+    g_object_unref (priv->service);
+service_fail:
+
+    return;
 }
 
 static void
@@ -300,5 +375,157 @@ hev_client_new_finish (GAsyncResult *res, GError **error)
       return HEV_CLIENT (object);
 
     return NULL;
+}
+
+void
+hev_client_start (HevClient *self)
+{
+    HevClientPrivate *priv = NULL;
+
+    g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
+
+    g_return_if_fail (HEV_IS_CLIENT (self));
+    priv = HEV_CLIENT_GET_PRIVATE (self);
+
+    g_socket_service_start (priv->service);
+}
+
+void
+hev_client_stop (HevClient *self)
+{
+    HevClientPrivate *priv = NULL;
+
+    g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
+
+    g_return_if_fail (HEV_IS_CLIENT (self));
+    priv = HEV_CLIENT_GET_PRIVATE (self);
+
+    g_socket_service_stop (priv->service);
+}
+
+static gboolean
+socket_service_incoming_handler (GSocketService *service,
+            GSocketConnection *connection,
+            GObject *source_object,
+            gpointer user_data)
+{
+    HevClient *self = HEV_CLIENT (user_data);
+    HevClientPrivate *priv = HEV_CLIENT_GET_PRIVATE (self);
+    HevClientClientData *cdat = NULL;
+    GSocketClient *client = NULL;
+    GError *error = NULL;
+
+    g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
+
+    client = g_socket_client_new ();
+    if (!client) {
+        g_critical ("Create socket client failed!");
+        goto client_fail;
+    }
+
+    cdat = g_slice_new0 (HevClientClientData);
+    if (!cdat) {
+        g_critical ("Alloc client data failed!");
+        goto cdat_fail;
+    }
+    cdat->lcl_stream = G_IO_STREAM (g_object_ref (connection));
+
+    g_socket_client_connect_to_host_async (client,
+                priv->server_addr, priv->server_port, NULL,
+                socket_client_connect_to_host_async_handler,
+                cdat);
+
+    return FALSE;
+
+cdat_fail:
+    g_object_unref (client);
+client_fail:
+
+    return FALSE;
+}
+
+static void
+socket_client_connect_to_host_async_handler (GObject *source_object,
+            GAsyncResult *res, gpointer user_data)
+{
+    HevClientClientData *cdat = user_data;
+    GSocketConnection *conn = NULL;
+    GError *error = NULL;
+
+    g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
+
+    conn = g_socket_client_connect_to_host_finish (
+                G_SOCKET_CLIENT (source_object), res, &error);
+    if (!conn) {
+        g_critical ("Connect to server host failed: %s", error->message);
+        g_clear_error (&error);
+        goto connect_fail;
+    }
+
+    cdat->tls_stream = g_tls_client_connection_new (G_IO_STREAM (conn),
+                NULL, &error);
+    if (!cdat->tls_stream) {
+        g_critical ("Create tls client stream failed: %s", error->message);
+        g_clear_error (&error);
+        goto tls_stream_fail;
+    }
+
+    g_io_stream_splice_async (cdat->lcl_stream, cdat->tls_stream,
+                G_IO_STREAM_SPLICE_NONE, G_PRIORITY_DEFAULT, NULL,
+                io_stream_splice_async_handler, cdat);
+
+    g_object_unref (conn);
+    g_object_unref (source_object);
+
+    return;
+
+tls_stream_fail:
+    g_object_unref (conn);
+connect_fail:
+    g_object_unref (source_object);
+    g_io_stream_close_async (cdat->lcl_stream,
+                G_PRIORITY_DEFAULT, NULL,
+                io_stream_close_async_handler,
+                NULL);
+    g_slice_free (HevClientClientData, cdat);
+
+    return;
+}
+
+static void
+io_stream_splice_async_handler (GObject *source_object,
+            GAsyncResult *res, gpointer user_data)
+{
+    HevClientClientData *cdat = user_data;
+    GError *error = NULL;
+
+    g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
+
+    if (!g_io_stream_splice_finish (res, &error)) {
+        g_debug ("Splice tls and server stream failed: %s", error->message);
+        g_clear_error (&error);
+    }
+
+    g_io_stream_close_async (cdat->tls_stream,
+                G_PRIORITY_DEFAULT, NULL,
+                io_stream_close_async_handler,
+                NULL);
+    g_io_stream_close_async (cdat->lcl_stream,
+                G_PRIORITY_DEFAULT, NULL,
+                io_stream_close_async_handler,
+                NULL);
+    g_slice_free (HevClientClientData, cdat);
+}
+
+static void
+io_stream_close_async_handler (GObject *source_object,
+            GAsyncResult *res, gpointer user_data)
+{
+    g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
+
+    g_io_stream_close_finish (G_IO_STREAM (source_object),
+                res, NULL);
+
+    g_object_unref (source_object);
 }
 

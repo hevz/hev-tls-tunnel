@@ -21,6 +21,12 @@ G_BEGIN_DECLS
 #define HEV_CLIENT_CLASS(klass) (G_TYPE_CHECK_CLASS_CAST ((klass), HEV_TYPE_CLIENT, HevClientClass))
 #define HEV_IS_CLIENT_CLASS(klass) (G_TYPE_CHECK_CLASS_TYPE ((klass), HEV_TYPE_CLIENT))
 #define HEV_CLIENT_GET_CLASS(obj) (G_TYPE_INSTANCE_GET_CLASS ((obj), HEV_TYPE_CLIENT, HevClientClass))
+#define HEV_CLIENT_ERROR (hev_client_error_quark ())
+
+typedef enum
+{
+    HEV_CLIENT_ERROR_SERVICE
+} HevClientErrorEnum;
 
 typedef struct _HevClient HevClient;
 typedef struct _HevClientClass HevClientClass;
@@ -37,11 +43,16 @@ struct _HevClientClass
 
 GType hev_client_get_type (void);
 
+GQuark hev_client_error_quark (void);
+
 void hev_client_new_async (gchar *server_addr, gint server_port,
             gchar *listen_addr, gint listen_port,
             GCancellable *cancellable, GAsyncReadyCallback callback,
             gpointer user_data);
 HevClient * hev_client_new_finish (GAsyncResult *res, GError **error);
+
+void hev_client_start (HevClient *self);
+void hev_client_stop (HevClient *self);
 
 G_END_DECLS
 
