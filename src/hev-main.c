@@ -20,6 +20,8 @@ static gchar *target_addr = NULL;
 static gint target_port = 0;
 static gchar *listen_addr = NULL;
 static gint listen_port = 0;
+static gchar *cert_file = NULL;
+static gchar *key_file = NULL;
 
 static gchar *server_addr = NULL;
 static gint server_port = 0;
@@ -44,6 +46,10 @@ static const GOptionEntry server_entries[] =
         "Listen address", NULL },
     { "listen-port", 'n', 0, G_OPTION_ARG_INT, &listen_port,
         "Listen port", NULL },
+    { "cert-file", 'c', 0, G_OPTION_ARG_STRING, &cert_file,
+        "Certificate file (PEM)", NULL },
+    { "key-file", 'k', 0, G_OPTION_ARG_STRING, &key_file,
+        "Private key file (PEM)", NULL },
     { NULL }
 };
 
@@ -130,7 +136,7 @@ main (int argc, char *argv[])
         goto option_chk_fail;
     }
     if (g_str_equal (mode, "server") &&
-                (!target_addr || !listen_addr)) {
+            (!target_addr || !listen_addr || !cert_file || !key_file)) {
         gchar *help = g_option_context_get_help (context, FALSE, srv_grp);
         g_fprintf (stderr, "%s", help);
         g_free (help);
@@ -156,7 +162,8 @@ main (int argc, char *argv[])
     /* Create worker */
     if (g_str_equal (mode, "server")) {
         hev_server_new_async (target_addr, target_port,
-                    listen_addr, listen_port, NULL,
+                    listen_addr, listen_port,
+                    cert_file, key_file, NULL,
                     hev_server_new_async_handler,
                     NULL);
     } else if (g_str_equal (mode, "client")) {
@@ -174,6 +181,8 @@ main (int argc, char *argv[])
     g_free (mode);
     g_free (target_addr);
     g_free (listen_addr);
+    g_free (cert_file);
+    g_free (key_file);
     g_free (server_addr);
     g_free (local_addr);
 
@@ -184,6 +193,8 @@ option_chk_fail:
     g_free (mode);
     g_free (target_addr);
     g_free (listen_addr);
+    g_free (cert_file);
+    g_free (key_file);
     g_free (server_addr);
     g_free (local_addr);
 option_fail:

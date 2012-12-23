@@ -39,6 +39,7 @@ GType hev_server_get_type (void);
 
 void hev_server_new_async (gchar *target_addr, gint target_port,
             gchar *listen_addr, gint listen_port,
+            gchar *cert_file, gchar *key_file,
             GCancellable *cancellable, GAsyncReadyCallback callback,
             gpointer user_data);
 HevServer * hev_server_new_finish (GAsyncResult *res, GError **error);

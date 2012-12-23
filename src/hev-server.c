@@ -19,6 +19,8 @@ enum
     PROP_TARGET_PORT,
     PROP_LISTEN_ADDR,
     PROP_LISTEN_PORT,
+    PROP_CERT_FILE,
+    PROP_KEY_FILE,
     N_PROPERTIES
 };
 
@@ -30,6 +32,8 @@ struct _HevServerPrivate
     gint target_port;
     gchar *listen_addr;
     gint listen_port;
+    gchar *cert_file;
+    gchar *key_file;
 };
 
 static void hev_server_async_initable_iface_init (GAsyncInitableIface *iface);
@@ -71,6 +75,16 @@ hev_server_finalize (GObject *obj)
     if (priv->listen_addr) {
         g_free (priv->listen_addr);
         priv->listen_addr = NULL;
+    }
+
+    if (priv->cert_file) {
+        g_free (priv->cert_file);
+        priv->cert_file = NULL;
+    }
+
+    if (priv->key_file) {
+        g_free (priv->key_file);
+        priv->key_file = NULL;
     }
 
     G_OBJECT_CLASS (hev_server_parent_class)->finalize (obj);
@@ -116,6 +130,12 @@ hev_server_get_property (GObject *obj, guint id,
     case PROP_LISTEN_PORT:
         g_value_set_int (value, priv->listen_port);
         break;
+    case PROP_CERT_FILE:
+        g_value_set_string (value, priv->cert_file);
+        break;
+    case PROP_KEY_FILE:
+        g_value_set_string (value, priv->key_file);
+        break;
     default:
         G_OBJECT_WARN_INVALID_PROPERTY_ID (obj, id, pspec);
         break;
@@ -147,6 +167,16 @@ hev_server_set_property (GObject *obj, guint id,
         break;
     case PROP_LISTEN_PORT:
         priv->listen_port = g_value_get_int (value);
+        break;
+    case PROP_CERT_FILE:
+        if (priv->cert_file)
+          g_free (priv->cert_file);
+        priv->cert_file = g_strdup (g_value_get_string (value));
+        break;
+    case PROP_KEY_FILE:
+        if (priv->key_file)
+          g_free (priv->key_file);
+        priv->key_file = g_strdup (g_value_get_string (value));
         break;
     default:
         G_OBJECT_WARN_INVALID_PROPERTY_ID (obj, id, pspec);
@@ -193,6 +223,18 @@ hev_server_class_init (HevServerClass *klass)
                     0, G_MAXUINT16, 6000,
                     G_PARAM_READWRITE |
                     G_PARAM_CONSTRUCT_ONLY);
+    hev_server_properties[PROP_CERT_FILE] =
+        g_param_spec_string ("cert-file",
+                    "certificate file", "Certificate file",
+                    NULL,
+                    G_PARAM_READWRITE |
+                    G_PARAM_CONSTRUCT_ONLY);
+    hev_server_properties[PROP_KEY_FILE] =
+        g_param_spec_string ("key-file",
+                    "private key file", "Private key file",
+                    NULL,
+                    G_PARAM_READWRITE |
+                    G_PARAM_CONSTRUCT_ONLY);
     g_object_class_install_properties (obj_class, N_PROPERTIES,
                 hev_server_properties);
 
@@ -219,6 +261,8 @@ hev_server_init (HevServer *self)
     priv->target_port = 22;
     priv->listen_addr = g_strdup ("0.0.0.0");
     priv->listen_port = 6000;
+    priv->cert_file = NULL;
+    priv->key_file = NULL;
 }
 
 static void
@@ -266,6 +310,7 @@ hev_server_async_initable_init_finish (GAsyncInitable *initable,
 void
 hev_server_new_async (gchar *target_addr, gint target_port,
             gchar *listen_addr, gint listen_port,
+            gchar *cert_file, gchar *key_file,
             GCancellable *cancellable, GAsyncReadyCallback callback,
             gpointer user_data)
 {
@@ -277,6 +322,8 @@ hev_server_new_async (gchar *target_addr, gint target_port,
                 "target-port", target_port,
                 "listen-addr", listen_addr,
                 "listen-port", listen_port,
+                "cert-file", cert_file,
+                "key-file", key_file,
                 NULL);
 }
 
