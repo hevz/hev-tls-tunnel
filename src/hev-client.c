@@ -497,6 +497,7 @@ io_stream_splice_async_handler (GObject *source_object,
             GAsyncResult *res, gpointer user_data)
 {
     HevClientClientData *cdat = user_data;
+    GIOStream *tls_base = NULL;
     GError *error = NULL;
 
     g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
@@ -506,10 +507,14 @@ io_stream_splice_async_handler (GObject *source_object,
         g_clear_error (&error);
     }
 
-    g_io_stream_close_async (cdat->tls_stream,
+    g_object_get (cdat->tls_stream,
+                "base-io-stream", &tls_base,
+                NULL);
+    g_io_stream_close_async (tls_base,
                 G_PRIORITY_DEFAULT, NULL,
                 io_stream_close_async_handler,
                 NULL);
+    g_object_unref (cdat->tls_stream);
     g_io_stream_close_async (cdat->lcl_stream,
                 G_PRIORITY_DEFAULT, NULL,
                 io_stream_close_async_handler,
