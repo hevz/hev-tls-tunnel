@@ -576,8 +576,8 @@ tls_connection_handshake_async_handler (GObject *source_object,
     }
 
     g_io_stream_splice_async (cdat->tgt_stream, cdat->tls_stream,
-                G_IO_STREAM_SPLICE_WAIT_FOR_BOTH, G_PRIORITY_DEFAULT,
-                NULL, io_stream_splice_async_handler, cdat);
+                G_IO_STREAM_SPLICE_NONE, G_PRIORITY_DEFAULT, NULL,
+                io_stream_splice_async_handler, cdat);
 
     return;
 
