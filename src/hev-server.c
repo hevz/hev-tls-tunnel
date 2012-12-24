@@ -56,6 +56,8 @@ static gboolean socket_service_incoming_handler (GSocketService *service,
             gpointer user_data);
 static void socket_client_connect_to_host_async_handler (GObject *source_object,
             GAsyncResult *res, gpointer user_data);
+static void tls_connection_handshake_async_handler (GObject *source_object,
+            GAsyncResult *res, gpointer user_data);
 static void io_stream_splice_async_handler (GObject *source_object,
             GAsyncResult *res, gpointer user_data);
 static void io_stream_close_async_handler (GObject *source_object,
@@ -537,9 +539,10 @@ socket_client_connect_to_host_async_handler (GObject *source_object,
     }
     cdat->tgt_stream = G_IO_STREAM (conn);
 
-    g_io_stream_splice_async (cdat->tgt_stream, cdat->tls_stream,
-                G_IO_STREAM_SPLICE_WAIT_FOR_BOTH, G_PRIORITY_DEFAULT,
-                NULL, io_stream_splice_async_handler, cdat);
+    g_tls_connection_handshake_async (G_TLS_CONNECTION (cdat->tls_stream),
+                G_PRIORITY_DEFAULT, NULL,
+                tls_connection_handshake_async_handler,
+                cdat);
 
     g_object_unref (source_object);
 
@@ -548,6 +551,42 @@ socket_client_connect_to_host_async_handler (GObject *source_object,
 connect_fail:
     g_object_unref (source_object);
     g_io_stream_close_async (cdat->tls_stream,
+                G_PRIORITY_DEFAULT, NULL,
+                io_stream_close_async_handler,
+                NULL);
+    g_slice_free (HevServerClientData, cdat);
+
+    return;
+}
+
+static void
+tls_connection_handshake_async_handler (GObject *source_object,
+            GAsyncResult *res, gpointer user_data)
+{
+    HevServerClientData *cdat = user_data;
+    GError *error = NULL;
+
+    g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
+
+    if (!g_tls_connection_handshake_finish (G_TLS_CONNECTION (source_object),
+                    res, &error)) {
+        g_critical ("TLS connection handshake failed: %s", error->message);
+        g_clear_error (&error);
+        goto handshake_fail;
+    }
+
+    g_io_stream_splice_async (cdat->tgt_stream, cdat->tls_stream,
+                G_IO_STREAM_SPLICE_WAIT_FOR_BOTH, G_PRIORITY_DEFAULT,
+                NULL, io_stream_splice_async_handler, cdat);
+
+    return;
+
+handshake_fail:
+    g_io_stream_close_async (cdat->tls_stream,
+                G_PRIORITY_DEFAULT, NULL,
+                io_stream_close_async_handler,
+                NULL);
+    g_io_stream_close_async (cdat->tgt_stream,
                 G_PRIORITY_DEFAULT, NULL,
                 io_stream_close_async_handler,
                 NULL);
