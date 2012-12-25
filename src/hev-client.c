@@ -576,7 +576,8 @@ tls_connection_accept_certificate_handler (GTlsConnection *conn,
     if (0 == errors)
       return TRUE;
 
-    if (priv->ca_file) {
+    if (priv->ca_file &&
+            (G_TLS_CERTIFICATE_UNKNOWN_CA == errors)) {
         GTlsCertificate *ca = NULL;
         GError *error = NULL;
 
