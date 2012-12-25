@@ -27,6 +27,7 @@ static gchar *server_addr = NULL;
 static gint server_port = 0;
 static gchar *local_addr = NULL;
 static gint local_port = 0;
+static gchar *ca_file = NULL;
 
 static GObject *worker = NULL;
 
@@ -63,6 +64,8 @@ static const GOptionEntry client_entries[] =
         "Local address", NULL },
     { "local-port", 'x', 0, G_OPTION_ARG_INT, &local_port,
         "Local port", NULL },
+    { "ca-file", 'r', 0, G_OPTION_ARG_STRING, &ca_file,
+        "Trusted CA file", NULL },
     { NULL }
 };
 
@@ -170,8 +173,8 @@ main (int argc, char *argv[])
                     NULL);
     } else if (g_str_equal (mode, "client")) {
         hev_client_new_async (server_addr, server_port,
-                    local_addr, local_port, NULL,
-                    hev_client_new_async_handler,
+                    local_addr, local_port, ca_file,
+                    NULL, hev_client_new_async_handler,
                     NULL);
     }
 
@@ -192,6 +195,7 @@ main (int argc, char *argv[])
     g_free (key_file);
     g_free (server_addr);
     g_free (local_addr);
+    g_free (ca_file);
 
     return 0;
 
@@ -204,6 +208,7 @@ option_chk_fail:
     g_free (key_file);
     g_free (server_addr);
     g_free (local_addr);
+    g_free (ca_file);
 option_fail:
     
     return -1;

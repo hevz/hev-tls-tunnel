@@ -19,6 +19,7 @@ enum
     PROP_SERVER_PORT,
     PROP_LOCAL_ADDR,
     PROP_LOCAL_PORT,
+    PROP_CA_FILE,
     N_PROPERTIES
 };
 
@@ -31,6 +32,7 @@ struct _HevClientPrivate
     gint server_port;
     gchar *local_addr;
     gint local_port;
+    gchar *ca_file;
 
     GSocketService *service;
 };
@@ -39,6 +41,8 @@ struct _HevClientClientData
 {
     GIOStream *tls_stream;
     GIOStream *lcl_stream;
+
+    HevClient *self;
 };
 
 static void hev_client_async_initable_iface_init (GAsyncInitableIface *iface);
@@ -151,6 +155,9 @@ hev_client_get_property (GObject *obj, guint id,
     case PROP_LOCAL_PORT:
         g_value_set_int (value, priv->local_port);
         break;
+    case PROP_CA_FILE:
+        g_value_set_string (value, priv->ca_file);
+        break;
     default:
         G_OBJECT_WARN_INVALID_PROPERTY_ID (obj, id, pspec);
         break;
@@ -182,6 +189,11 @@ hev_client_set_property (GObject *obj, guint id,
         break;
     case PROP_LOCAL_PORT:
         priv->local_port = g_value_get_int (value);
+        break;
+    case PROP_CA_FILE:
+        if (priv->ca_file)
+          g_free (priv->ca_file);
+        priv->ca_file = g_strdup (g_value_get_string (value));
         break;
     default:
         G_OBJECT_WARN_INVALID_PROPERTY_ID (obj, id, pspec);
@@ -226,6 +238,12 @@ hev_client_class_init (HevClientClass *klass)
         g_param_spec_int ("local-port",
                     "local port", "Local port",
                     0, G_MAXUINT16, 6000,
+                    G_PARAM_READWRITE |
+                    G_PARAM_CONSTRUCT_ONLY);
+    hev_client_properties[PROP_CA_FILE] =
+        g_param_spec_string ("ca-file",
+                    "trusted ca file", "Trusted CA file",
+                    NULL,
                     G_PARAM_READWRITE |
                     G_PARAM_CONSTRUCT_ONLY);
     g_object_class_install_properties (obj_class, N_PROPERTIES,
@@ -343,7 +361,7 @@ hev_client_async_initable_init_finish (GAsyncInitable *initable,
 
 void
 hev_client_new_async (gchar *server_addr, gint server_port,
-            gchar *local_addr, gint local_port,
+            gchar *local_addr, gint local_port, gchar *ca_file,
             GCancellable *cancellable, GAsyncReadyCallback callback,
             gpointer user_data)
 {
@@ -355,6 +373,7 @@ hev_client_new_async (gchar *server_addr, gint server_port,
                 "server-port", server_port,
                 "local-addr", local_addr,
                 "local-port", local_port,
+                "ca-file", ca_file,
                 NULL);
 }
 
@@ -432,6 +451,7 @@ socket_service_incoming_handler (GSocketService *service,
         goto cdat_fail;
     }
     cdat->lcl_stream = G_IO_STREAM (g_object_ref (connection));
+    cdat->self = g_object_ref (self);
 
     g_socket_client_connect_to_host_async (client,
                 priv->server_addr, priv->server_port, NULL,
@@ -475,7 +495,7 @@ socket_client_connect_to_host_async_handler (GObject *source_object,
 
     g_signal_connect (cdat->tls_stream, "accept-certificate",
                 G_CALLBACK (tls_connection_accept_certificate_handler),
-                NULL);
+                cdat);
 
     g_io_stream_splice_async (cdat->lcl_stream, cdat->tls_stream,
                 G_IO_STREAM_SPLICE_NONE, G_PRIORITY_DEFAULT, NULL,
@@ -494,6 +514,7 @@ connect_fail:
                 G_PRIORITY_DEFAULT, NULL,
                 io_stream_close_async_handler,
                 NULL);
+    g_object_unref (cdat->self);
     g_slice_free (HevClientClientData, cdat);
 
     return;
@@ -526,6 +547,7 @@ io_stream_splice_async_handler (GObject *source_object,
                 G_PRIORITY_DEFAULT, NULL,
                 io_stream_close_async_handler,
                 NULL);
+    g_object_unref (cdat->self);
     g_slice_free (HevClientClientData, cdat);
 }
 
@@ -546,7 +568,34 @@ tls_connection_accept_certificate_handler (GTlsConnection *conn,
             GTlsCertificate *peer_cert, GTlsCertificateFlags errors,
             gpointer user_data)
 {
+    HevClientClientData *cdat = user_data;
+    HevClientPrivate *priv = HEV_CLIENT_GET_PRIVATE (cdat->self);
+
     g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
+
+    if (0 == errors)
+      return TRUE;
+
+    if (priv->ca_file) {
+        GTlsCertificate *ca = NULL;
+        GError *error = NULL;
+
+        ca = g_tls_certificate_new_from_file (priv->ca_file,
+                    &error);
+        if (!ca) {
+            g_critical ("Create ca certificate failed: %s",
+                        error->message);
+            g_clear_error (&error);
+        } else {
+            gboolean ret = FALSE;
+
+            if (0 == g_tls_certificate_verify (peer_cert, NULL, ca))
+              ret = TRUE;
+
+            g_object_unref (ca);
+            return ret;
+        }
+    }
 
     if (G_TLS_CERTIFICATE_UNKNOWN_CA & errors)
       g_warning ("TLS certificate unknown ca!");
@@ -563,6 +612,6 @@ tls_connection_accept_certificate_handler (GTlsConnection *conn,
     if (G_TLS_CERTIFICATE_GENERIC_ERROR & errors)
       g_warning ("TLS certificate generic error!");
 
-    return TRUE;
+    return FALSE;
 }
 
