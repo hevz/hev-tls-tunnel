@@ -56,6 +56,9 @@ static void io_stream_splice_async_handler (GObject *source_object,
             GAsyncResult *res, gpointer user_data);
 static void io_stream_close_async_handler (GObject *source_object,
             GAsyncResult *res, gpointer user_data);
+static gboolean tls_connection_accept_certificate_handler (GTlsConnection *conn,
+            GTlsCertificate *peer_cert, GTlsCertificateFlags errors,
+            gpointer user_data);
 
 static GParamSpec *hev_client_properties[N_PROPERTIES] = { NULL };
 
@@ -470,6 +473,10 @@ socket_client_connect_to_host_async_handler (GObject *source_object,
         goto tls_stream_fail;
     }
 
+    g_signal_connect (cdat->tls_stream, "accept-certificate",
+                G_CALLBACK (tls_connection_accept_certificate_handler),
+                NULL);
+
     g_io_stream_splice_async (cdat->lcl_stream, cdat->tls_stream,
                 G_IO_STREAM_SPLICE_NONE, G_PRIORITY_DEFAULT, NULL,
                 io_stream_splice_async_handler, cdat);
@@ -532,5 +539,30 @@ io_stream_close_async_handler (GObject *source_object,
                 res, NULL);
 
     g_object_unref (source_object);
+}
+
+static gboolean
+tls_connection_accept_certificate_handler (GTlsConnection *conn,
+            GTlsCertificate *peer_cert, GTlsCertificateFlags errors,
+            gpointer user_data)
+{
+    g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
+
+    if (G_TLS_CERTIFICATE_UNKNOWN_CA & errors)
+      g_warning ("TLS certificate unknown ca!");
+    if (G_TLS_CERTIFICATE_BAD_IDENTITY & errors)
+      g_warning ("TLS certificate bad identify!");
+    if (G_TLS_CERTIFICATE_NOT_ACTIVATED & errors)
+      g_warning ("TLS certificate not activated!");
+    if (G_TLS_CERTIFICATE_EXPIRED & errors)
+      g_warning ("TLS certificate expired!");
+    if (G_TLS_CERTIFICATE_REVOKED & errors)
+      g_warning ("TLS certificate revoked!");
+    if (G_TLS_CERTIFICATE_INSECURE & errors)
+      g_warning ("TLS certificate insecure!");
+    if (G_TLS_CERTIFICATE_GENERIC_ERROR & errors)
+      g_warning ("TLS certificate generic error!");
+
+    return TRUE;
 }
 
