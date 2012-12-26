@@ -35,6 +35,7 @@ struct _HevClientPrivate
     gchar *ca_file;
 
     GSocketService *service;
+    GSocketClient *client;
 };
 
 struct _HevClientClientData
@@ -89,6 +90,11 @@ hev_client_dispose (GObject *obj)
                     self);
         g_object_unref (priv->service);
         priv->service = NULL;
+    }
+
+    if (priv->client) {
+        g_object_unref (priv->client);
+        priv->client = NULL;
     }
 
     G_OBJECT_CLASS (hev_client_parent_class)->dispose (obj);
@@ -313,8 +319,18 @@ async_result_run_in_thread_handler (GSimpleAsyncResult *simple,
                 G_CALLBACK (socket_service_incoming_handler),
                 self);
 
+    priv->client = g_socket_client_new ();
+    if (!priv->client) {
+        g_simple_async_result_set_error (simple,
+                    HEV_CLIENT_ERROR,
+                    HEV_CLIENT_ERROR_CLIENT,
+                    "Create socket client failed!");
+        goto client_fail;
+    }
+
     return;
 
+client_fail:
 add_addr_fail:
     g_object_unref (saddr);
     g_object_unref (iaddr);
@@ -434,16 +450,9 @@ socket_service_incoming_handler (GSocketService *service,
     HevClient *self = HEV_CLIENT (user_data);
     HevClientPrivate *priv = HEV_CLIENT_GET_PRIVATE (self);
     HevClientClientData *cdat = NULL;
-    GSocketClient *client = NULL;
     GError *error = NULL;
 
     g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
-
-    client = g_socket_client_new ();
-    if (!client) {
-        g_critical ("Create socket client failed!");
-        goto client_fail;
-    }
 
     cdat = g_slice_new0 (HevClientClientData);
     if (!cdat) {
@@ -453,7 +462,7 @@ socket_service_incoming_handler (GSocketService *service,
     cdat->lcl_stream = G_IO_STREAM (g_object_ref (connection));
     cdat->self = g_object_ref (self);
 
-    g_socket_client_connect_to_host_async (client,
+    g_socket_client_connect_to_host_async (priv->client,
                 priv->server_addr, priv->server_port, NULL,
                 socket_client_connect_to_host_async_handler,
                 cdat);
@@ -461,8 +470,6 @@ socket_service_incoming_handler (GSocketService *service,
     return FALSE;
 
 cdat_fail:
-    g_object_unref (client);
-client_fail:
 
     return FALSE;
 }
@@ -502,14 +509,12 @@ socket_client_connect_to_host_async_handler (GObject *source_object,
                 io_stream_splice_async_handler, cdat);
 
     g_object_unref (conn);
-    g_object_unref (source_object);
 
     return;
 
 tls_stream_fail:
     g_object_unref (conn);
 connect_fail:
-    g_object_unref (source_object);
     g_io_stream_close_async (cdat->lcl_stream,
                 G_PRIORITY_DEFAULT, NULL,
                 io_stream_close_async_handler,

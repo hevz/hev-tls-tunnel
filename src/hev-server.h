@@ -25,7 +25,8 @@ G_BEGIN_DECLS
 
 typedef enum
 {
-    HEV_SERVER_ERROR_SERVICE
+    HEV_SERVER_ERROR_SERVICE,
+    HEV_SERVER_ERROR_CLIENT
 } HevServerErrorEnum;
 
 typedef struct _HevServer HevServer;
