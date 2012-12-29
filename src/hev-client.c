@@ -9,6 +9,7 @@
  */
 
 #include "hev-client.h"
+#include "hev-protocol.h"
 
 #define HEV_CLIENT_GET_PRIVATE(obj) (G_TYPE_INSTANCE_GET_PRIVATE ((obj), HEV_TYPE_CLIENT, HevClientPrivate))
 
@@ -44,6 +45,7 @@ struct _HevClientClientData
     GIOStream *lcl_stream;
 
     HevClient *self;
+    HevProtocolMessage msg;
 };
 
 static void hev_client_async_initable_iface_init (GAsyncInitableIface *iface);
@@ -58,6 +60,8 @@ static gboolean socket_service_incoming_handler (GSocketService *service,
 static void socket_client_connect_to_host_async_handler (GObject *source_object,
             GAsyncResult *res, gpointer user_data);
 static void io_stream_splice_async_handler (GObject *source_object,
+            GAsyncResult *res, gpointer user_data);
+static void output_stream_write_async_handler (GObject *source_object,
             GAsyncResult *res, gpointer user_data);
 static void io_stream_close_async_handler (GObject *source_object,
             GAsyncResult *res, gpointer user_data);
@@ -480,6 +484,7 @@ socket_client_connect_to_host_async_handler (GObject *source_object,
 {
     HevClientClientData *cdat = user_data;
     GSocketConnection *conn = NULL;
+    GOutputStream *tls_output = NULL;
     GError *error = NULL;
 
     g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
@@ -504,9 +509,13 @@ socket_client_connect_to_host_async_handler (GObject *source_object,
                 G_CALLBACK (tls_connection_accept_certificate_handler),
                 cdat);
 
-    g_io_stream_splice_async (cdat->lcl_stream, cdat->tls_stream,
-                G_IO_STREAM_SPLICE_NONE, G_PRIORITY_DEFAULT, NULL,
-                io_stream_splice_async_handler, cdat);
+    hev_protocol_message_set (&cdat->msg);
+    tls_output = g_io_stream_get_output_stream (cdat->tls_stream);
+    g_output_stream_write_async (tls_output,
+                &cdat->msg, HEV_PROTO_MESSAGE_SIZE,
+                G_PRIORITY_DEFAULT, NULL,
+                output_stream_write_async_handler,
+                cdat);
 
     g_object_unref (conn);
 
@@ -515,6 +524,52 @@ socket_client_connect_to_host_async_handler (GObject *source_object,
 tls_stream_fail:
     g_object_unref (conn);
 connect_fail:
+    g_io_stream_close_async (cdat->lcl_stream,
+                G_PRIORITY_DEFAULT, NULL,
+                io_stream_close_async_handler,
+                NULL);
+    g_object_unref (cdat->self);
+    g_slice_free (HevClientClientData, cdat);
+
+    return;
+}
+
+static void
+output_stream_write_async_handler (GObject *source_object,
+            GAsyncResult *res, gpointer user_data)
+{
+    HevClientClientData *cdat = user_data;
+    GIOStream *tls_base = NULL;
+    gssize size = 0;
+    GError *error = NULL;
+
+    g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
+
+    size = g_output_stream_write_finish (G_OUTPUT_STREAM (source_object),
+                res, &error);
+    switch (size) {
+    case -1:
+        g_critical ("TLS connection write failed: %s", error->message);
+        g_clear_error (&error);
+    case 0:
+        goto closed;
+    }
+
+    g_io_stream_splice_async (cdat->lcl_stream, cdat->tls_stream,
+                G_IO_STREAM_SPLICE_NONE, G_PRIORITY_DEFAULT, NULL,
+                io_stream_splice_async_handler, cdat);
+
+    return;
+
+closed:
+    g_object_get (cdat->tls_stream,
+                "base-io-stream", &tls_base,
+                NULL);
+    g_io_stream_close_async (tls_base,
+                G_PRIORITY_DEFAULT, NULL,
+                io_stream_close_async_handler,
+                NULL);
+    g_object_unref (cdat->tls_stream);
     g_io_stream_close_async (cdat->lcl_stream,
                 G_PRIORITY_DEFAULT, NULL,
                 io_stream_close_async_handler,
