@@ -44,6 +44,8 @@ struct _HevServerClientData
 {
     GIOStream *tls_stream;
     GIOStream *tgt_stream;
+
+    HevServer *self;
 };
 
 static void hev_server_async_initable_iface_init (GAsyncInitableIface *iface);
@@ -55,9 +57,9 @@ static gboolean hev_server_async_initable_init_finish (GAsyncInitable *initable,
 static gboolean socket_service_incoming_handler (GSocketService *service,
             GSocketConnection *connection, GObject *source_object,
             gpointer user_data);
-static void socket_client_connect_to_host_async_handler (GObject *source_object,
-            GAsyncResult *res, gpointer user_data);
 static void tls_connection_handshake_async_handler (GObject *source_object,
+            GAsyncResult *res, gpointer user_data);
+static void socket_client_connect_to_host_async_handler (GObject *source_object,
             GAsyncResult *res, gpointer user_data);
 static void io_stream_splice_async_handler (GObject *source_object,
             GAsyncResult *res, gpointer user_data);
@@ -505,10 +507,11 @@ socket_service_incoming_handler (GSocketService *service,
         goto cdat_fail;
     }
     cdat->tls_stream = tls_stream;
+    cdat->self = g_object_ref (self);
 
-    g_socket_client_connect_to_host_async (priv->client,
-                priv->target_addr, priv->target_port, NULL,
-                socket_client_connect_to_host_async_handler,
+    g_tls_connection_handshake_async (G_TLS_CONNECTION (tls_stream),
+                G_PRIORITY_DEFAULT, NULL,
+                tls_connection_handshake_async_handler,
                 cdat);
 
     g_object_unref (cert);
@@ -522,6 +525,46 @@ tls_stream_fail:
 cert_fail:
 
     return FALSE;
+}
+
+static void
+tls_connection_handshake_async_handler (GObject *source_object,
+            GAsyncResult *res, gpointer user_data)
+{
+    HevServerClientData *cdat = user_data;
+    HevServerPrivate *priv = HEV_SERVER_GET_PRIVATE (cdat->self);
+    GIOStream *tls_base = NULL;
+    GError *error = NULL;
+
+    g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
+
+    if (!g_tls_connection_handshake_finish (G_TLS_CONNECTION (source_object),
+                    res, &error)) {
+        g_critical ("TLS connection handshake failed: %s", error->message);
+        g_clear_error (&error);
+        goto handshake_fail;
+    }
+
+    g_socket_client_connect_to_host_async (priv->client,
+                priv->target_addr, priv->target_port, NULL,
+                socket_client_connect_to_host_async_handler,
+                cdat);
+
+    return;
+
+handshake_fail:
+    g_object_get (cdat->tls_stream,
+                "base-io-stream", &tls_base,
+                NULL);
+    g_io_stream_close_async (tls_base,
+                G_PRIORITY_DEFAULT, NULL,
+                io_stream_close_async_handler,
+                NULL);
+    g_object_unref (cdat->tls_stream);
+    g_object_unref (cdat->self);
+    g_slice_free (HevServerClientData, cdat);
+
+    return;
 }
 
 static void
@@ -544,10 +587,9 @@ socket_client_connect_to_host_async_handler (GObject *source_object,
     }
     cdat->tgt_stream = G_IO_STREAM (conn);
 
-    g_tls_connection_handshake_async (G_TLS_CONNECTION (cdat->tls_stream),
-                G_PRIORITY_DEFAULT, NULL,
-                tls_connection_handshake_async_handler,
-                cdat);
+    g_io_stream_splice_async (cdat->tgt_stream, cdat->tls_stream,
+                G_IO_STREAM_SPLICE_NONE, G_PRIORITY_DEFAULT, NULL,
+                io_stream_splice_async_handler, cdat);
 
     return;
 
@@ -560,47 +602,7 @@ connect_fail:
                 io_stream_close_async_handler,
                 NULL);
     g_object_unref (cdat->tls_stream);
-    g_slice_free (HevServerClientData, cdat);
-
-    return;
-}
-
-static void
-tls_connection_handshake_async_handler (GObject *source_object,
-            GAsyncResult *res, gpointer user_data)
-{
-    HevServerClientData *cdat = user_data;
-    GIOStream *tls_base = NULL;
-    GError *error = NULL;
-
-    g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
-
-    if (!g_tls_connection_handshake_finish (G_TLS_CONNECTION (source_object),
-                    res, &error)) {
-        g_critical ("TLS connection handshake failed: %s", error->message);
-        g_clear_error (&error);
-        goto handshake_fail;
-    }
-
-    g_io_stream_splice_async (cdat->tgt_stream, cdat->tls_stream,
-                G_IO_STREAM_SPLICE_NONE, G_PRIORITY_DEFAULT, NULL,
-                io_stream_splice_async_handler, cdat);
-
-    return;
-
-handshake_fail:
-    g_object_get (cdat->tls_stream,
-                "base-io-stream", &tls_base,
-                NULL);
-    g_io_stream_close_async (tls_base,
-                G_PRIORITY_DEFAULT, NULL,
-                io_stream_close_async_handler,
-                NULL);
-    g_object_unref (cdat->tls_stream);
-    g_io_stream_close_async (cdat->tgt_stream,
-                G_PRIORITY_DEFAULT, NULL,
-                io_stream_close_async_handler,
-                NULL);
+    g_object_unref (cdat->self);
     g_slice_free (HevServerClientData, cdat);
 
     return;
@@ -633,6 +635,7 @@ io_stream_splice_async_handler (GObject *source_object,
                 G_PRIORITY_DEFAULT, NULL,
                 io_stream_close_async_handler,
                 NULL);
+    g_object_unref (cdat->self);
     g_slice_free (HevServerClientData, cdat);
 }
 
