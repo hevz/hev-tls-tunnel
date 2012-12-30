@@ -377,8 +377,6 @@ hev_server_async_initable_init_async (GAsyncInitable *initable,
             gint io_priority, GCancellable *cancellable,
             GAsyncReadyCallback callback, gpointer user_data)
 {
-    HevServer *self = HEV_SERVER (initable);
-    HevServerPrivate *priv = HEV_SERVER_GET_PRIVATE (self);
     GSimpleAsyncResult *simple = NULL;
 
     g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
@@ -537,7 +535,6 @@ tls_connection_handshake_async_handler (GObject *source_object,
             GAsyncResult *res, gpointer user_data)
 {
     HevServerClientData *cdat = user_data;
-    HevServerPrivate *priv = HEV_SERVER_GET_PRIVATE (cdat->self);
     GIOStream *tls_base = NULL;
     GInputStream *tls_input = NULL;
     GInputStream *tls_bufed_input = NULL;

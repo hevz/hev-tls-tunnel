@@ -2,7 +2,7 @@
  
 PP=cpp
 CC=gcc
-CCFLAGS=-g `pkg-config --cflags gio-2.0`
+CCFLAGS=-g -Werror -Wall `pkg-config --cflags gio-2.0`
 LDFLAGS=`pkg-config --libs gio-2.0`
  
 SRCDIR=src

@@ -349,8 +349,6 @@ hev_client_async_initable_init_async (GAsyncInitable *initable,
             gint io_priority, GCancellable *cancellable,
             GAsyncReadyCallback callback, gpointer user_data)
 {
-    HevClient *self = HEV_CLIENT (initable);
-    HevClientPrivate *priv = HEV_CLIENT_GET_PRIVATE (self);
     GSimpleAsyncResult *simple = NULL;
 
     g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
@@ -454,7 +452,6 @@ socket_service_incoming_handler (GSocketService *service,
     HevClient *self = HEV_CLIENT (user_data);
     HevClientPrivate *priv = HEV_CLIENT_GET_PRIVATE (self);
     HevClientClientData *cdat = NULL;
-    GError *error = NULL;
 
     g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
 
