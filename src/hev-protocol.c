@@ -41,11 +41,12 @@ const gchar *
 hev_protocol_get_invalid_message (gsize *count)
 {
     gchar *message =
-        "HTTP/1.1 200 OK\n"
-        "Content-Type: text/plain\n"
-        "Content-Length: 18\n"
-        "\n"
-        "Service available!";
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Type: text/html\r\n"
+        "Content-Length: 19\r\n"
+        "Connection: close\r\n"
+        "\r\n"
+        "<h1>It works!</h1>\n";
 
     if (count)
       *count = strlen (message);
