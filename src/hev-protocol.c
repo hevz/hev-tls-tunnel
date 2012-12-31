@@ -33,6 +33,9 @@ hev_protocol_header_is_valid (const HevProtocolHeader *self)
 
     if (!self || HEV_PROTO_ACTIVATE_KEY != self->activate_key)
       return FALSE;
+    if (HEV_PROTO_HEADER_MINN_SIZE > self->length ||
+            HEV_PROTO_HEADER_MAXN_SIZE < self->length)
+      return FALSE;
 
     return TRUE;
 }
