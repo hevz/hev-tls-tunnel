@@ -45,7 +45,7 @@ struct _HevClientClientData
     GIOStream *lcl_stream;
 
     HevClient *self;
-    HevProtocolMessage msg;
+    guint8 proto_header[HEV_PROTO_HEADER_MAXN_SIZE];
 };
 
 static void hev_client_async_initable_iface_init (GAsyncInitableIface *iface);
@@ -482,6 +482,7 @@ socket_client_connect_to_host_async_handler (GObject *source_object,
     HevClientClientData *cdat = user_data;
     GSocketConnection *conn = NULL;
     GOutputStream *tls_output = NULL;
+    guint32 length = 0;
     GError *error = NULL;
 
     g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
@@ -506,10 +507,13 @@ socket_client_connect_to_host_async_handler (GObject *source_object,
                 G_CALLBACK (tls_connection_accept_certificate_handler),
                 cdat);
 
-    hev_protocol_message_set (&cdat->msg);
+    length = g_random_int_range (HEV_PROTO_HEADER_MINN_SIZE,
+                HEV_PROTO_HEADER_MAXN_SIZE);
+    hev_protocol_header_set ((HevProtocolHeader *)&cdat->proto_header,
+                length);
     tls_output = g_io_stream_get_output_stream (cdat->tls_stream);
     g_output_stream_write_async (tls_output,
-                &cdat->msg, HEV_PROTO_MESSAGE_SIZE,
+                &cdat->proto_header, length,
                 G_PRIORITY_DEFAULT, NULL,
                 output_stream_write_async_handler,
                 cdat);

@@ -13,7 +13,7 @@
 #include "hev-protocol.h"
 
 gboolean
-hev_protocol_message_set (HevProtocolMessage *self)
+hev_protocol_header_set (HevProtocolHeader *self, guint32 length)
 {
     g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
 
@@ -21,12 +21,13 @@ hev_protocol_message_set (HevProtocolMessage *self)
       return FALSE;
 
     self->activate_key = HEV_PROTO_ACTIVATE_KEY;
+    self->length = length;
 
     return TRUE;
 }
 
 gboolean
-hev_protocol_message_is_valid (const HevProtocolMessage *self)
+hev_protocol_header_is_valid (const HevProtocolHeader *self)
 {
     g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
 

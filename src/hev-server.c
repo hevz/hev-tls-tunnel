@@ -62,6 +62,8 @@ static void tls_connection_handshake_async_handler (GObject *source_object,
             GAsyncResult *res, gpointer user_data);
 static void buffered_input_stream_fill_async_handler (GObject *source_object,
             GAsyncResult *res, gpointer user_data);
+static void input_stream_skip_async_handler (GObject *source_object,
+            GAsyncResult *res, gpointer user_data);
 static void output_stream_write_async_handler (GObject *source_object,
             GAsyncResult *res, gpointer user_data);
 static void socket_client_connect_to_host_async_handler (GObject *source_object,
@@ -551,13 +553,13 @@ tls_connection_handshake_async_handler (GObject *source_object,
 
     tls_input = g_io_stream_get_input_stream (cdat->tls_stream);
     tls_bufed_input = g_buffered_input_stream_new_sized (tls_input,
-                HEV_PROTO_MESSAGE_SIZE);
+                HEV_PROTO_HEADER_REAL_SIZE);
     g_filter_input_stream_set_close_base_stream (
                 G_FILTER_INPUT_STREAM (tls_bufed_input),
                 FALSE);
     g_buffered_input_stream_fill_async (
                 G_BUFFERED_INPUT_STREAM (tls_bufed_input),
-                HEV_PROTO_MESSAGE_SIZE, G_PRIORITY_DEFAULT,
+                HEV_PROTO_HEADER_REAL_SIZE, G_PRIORITY_DEFAULT,
                 NULL, buffered_input_stream_fill_async_handler,
                 cdat);
 
@@ -583,11 +585,10 @@ buffered_input_stream_fill_async_handler (GObject *source_object,
             GAsyncResult *res, gpointer user_data)
 {
     HevServerClientData *cdat = user_data;
-    HevServerPrivate *priv = HEV_SERVER_GET_PRIVATE (cdat->self);
     GBufferedInputStream *tls_bufed_input = NULL;
     GIOStream *tls_base = NULL;
     gssize size = 0;
-    const HevProtocolMessage *msg = NULL;
+    const HevProtocolHeader *header = NULL;
     gsize len = 0;
     GError *error = NULL;
 
@@ -605,11 +606,16 @@ buffered_input_stream_fill_async_handler (GObject *source_object,
         goto closed;
     }
 
-    msg = g_buffered_input_stream_peek_buffer (tls_bufed_input, &len);
-    if (hev_protocol_message_is_valid (msg)) {
-        g_socket_client_connect_to_host_async (priv->client,
-                    priv->target_addr, priv->target_port, NULL,
-                    socket_client_connect_to_host_async_handler,
+    header = g_buffered_input_stream_peek_buffer (tls_bufed_input, &len);
+    if (hev_protocol_header_is_valid (header)) {
+        GInputStream *tls_input = NULL;
+
+        tls_input = g_filter_input_stream_get_base_stream (
+                    G_FILTER_INPUT_STREAM (tls_bufed_input));
+        g_input_stream_skip_async (tls_input,
+                    header->length - HEV_PROTO_HEADER_REAL_SIZE,
+                    G_PRIORITY_DEFAULT, NULL,
+                    input_stream_skip_async_handler,
                     cdat);
     } else {
         GOutputStream *tls_output = NULL;
@@ -630,6 +636,51 @@ buffered_input_stream_fill_async_handler (GObject *source_object,
 
 closed:
     g_object_unref (tls_bufed_input);
+    g_object_get (cdat->tls_stream,
+                "base-io-stream", &tls_base,
+                NULL);
+    g_io_stream_close_async (tls_base,
+                G_PRIORITY_DEFAULT, NULL,
+                io_stream_close_async_handler,
+                NULL);
+    g_object_unref (cdat->tls_stream);
+    g_object_unref (cdat->self);
+    g_slice_free (HevServerClientData, cdat);
+
+    return;
+}
+
+static void
+input_stream_skip_async_handler (GObject *source_object,
+            GAsyncResult *res, gpointer user_data)
+{
+    HevServerClientData *cdat = user_data;
+    HevServerPrivate *priv = HEV_SERVER_GET_PRIVATE (cdat->self);
+    GIOStream *tls_base = NULL;
+    gssize size = 0;
+    GError *error = NULL;
+
+    g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
+
+    size = g_input_stream_skip_finish (G_INPUT_STREAM (source_object),
+                res, &error);
+    switch (size) {
+    case -1:
+        g_critical ("Buffered input stream fill failed: %s",
+                    error->message);
+        g_clear_error (&error);
+    case 0:
+        goto closed;
+    }
+
+    g_socket_client_connect_to_host_async (priv->client,
+                priv->target_addr, priv->target_port, NULL,
+                socket_client_connect_to_host_async_handler,
+                cdat);
+
+    return;
+
+closed:
     g_object_get (cdat->tls_stream,
                 "base-io-stream", &tls_base,
                 NULL);
