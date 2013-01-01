@@ -335,6 +335,7 @@ async_result_run_in_thread_handler (GSimpleAsyncResult *simple,
                     "Create socket service failed!");
         goto service_fail;
     }
+    g_object_set (priv->service, "listen-backlog", 100, NULL);
 
     iaddr = g_inet_address_new_from_string (priv->listen_addr);
     saddr = g_inet_socket_address_new (iaddr, priv->listen_port);
