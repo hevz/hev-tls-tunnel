@@ -523,6 +523,8 @@ socket_service_run_handler (GThreadedSocketService *service,
     cdat->self = g_object_ref (self);
     cdat->loop = g_main_loop_ref (loop);
 
+    g_object_unref (cert);
+
     g_tls_connection_handshake_async (G_TLS_CONNECTION (tls_stream),
                 G_PRIORITY_DEFAULT, NULL,
                 tls_connection_handshake_async_handler,
@@ -530,7 +532,9 @@ socket_service_run_handler (GThreadedSocketService *service,
 
     g_main_loop_run (loop);
 
-    g_object_unref (cert);
+    g_object_unref (cdat->self);
+    g_main_loop_unref (cdat->loop);
+    g_slice_free (HevServerClientData, cdat);
 
     g_main_context_pop_thread_default (context);
     g_main_loop_unref (loop);
@@ -820,11 +824,7 @@ io_stream_close_async_handler (GObject *source_object,
       cdat->tgt_stream = NULL;
     g_object_unref (source_object);
 
-    if (!cdat->tls_stream && !cdat->tgt_stream) {
-        g_object_unref (cdat->self);
-        g_main_loop_quit (cdat->loop);
-        g_main_loop_unref (cdat->loop);
-        g_slice_free (HevServerClientData, cdat);
-    }
+    if (!cdat->tls_stream && !cdat->tgt_stream)
+      g_main_loop_quit (cdat->loop);
 }
 

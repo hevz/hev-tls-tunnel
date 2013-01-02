@@ -478,6 +478,10 @@ socket_service_run_handler (GThreadedSocketService *service,
 
     g_main_loop_run (loop);
 
+    g_object_unref (cdat->self);
+    g_main_loop_unref (cdat->loop);
+    g_slice_free (HevClientClientData, cdat);
+
     g_main_context_pop_thread_default (context);
     g_main_loop_unref (loop);
     g_main_context_unref (context);
@@ -642,12 +646,8 @@ io_stream_close_async_handler (GObject *source_object,
       cdat->lcl_stream = NULL;
     g_object_unref (source_object);
 
-    if (!cdat->tls_stream && !cdat->lcl_stream) {
-        g_object_unref (cdat->self);
-        g_main_loop_quit (cdat->loop);
-        g_main_loop_unref (cdat->loop);
-        g_slice_free (HevClientClientData, cdat);
-    }
+    if (!cdat->tls_stream && !cdat->lcl_stream)
+      g_main_loop_quit (cdat->loop);
 }
 
 static gboolean
