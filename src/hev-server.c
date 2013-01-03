@@ -509,10 +509,8 @@ timeout_handler (gpointer user_data)
 
     cdat->timeout_count ++;
 
-    if (HEV_SERVER_TIMEOUT_MAX_COUNT <= cdat->timeout_count) {
-        g_cancellable_cancel (cdat->cancellable);
-        return FALSE;
-    }
+    if (HEV_SERVER_TIMEOUT_MAX_COUNT <= cdat->timeout_count)
+      g_cancellable_cancel (cdat->cancellable);
 
     return TRUE;
 }
