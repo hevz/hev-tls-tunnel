@@ -11,6 +11,9 @@
 #include "hev-server.h"
 #include "hev-protocol.h"
 
+#define HEV_SERVER_TIMEOUT_SECONDS      20
+#define HEV_SERVER_TIMEOUT_MAX_COUNT    3
+
 #define HEV_SERVER_GET_PRIVATE(obj) (G_TYPE_INSTANCE_GET_PRIVATE ((obj), HEV_TYPE_SERVER, HevServerPrivate))
 
 enum
@@ -46,6 +49,9 @@ struct _HevServerClientData
     GIOStream *tls_stream;
     GIOStream *tgt_stream;
 
+    guint timeout_count;
+    GCancellable *cancellable;
+
     HevServer *self;
     GMainLoop *loop;
 };
@@ -56,6 +62,9 @@ static void hev_server_async_initable_init_async (GAsyncInitable *initable,
             GAsyncReadyCallback callback, gpointer user_data);
 static gboolean hev_server_async_initable_init_finish (GAsyncInitable *initable,
             GAsyncResult *result, GError **error);
+static gboolean socket_source_handler (GSocket *socket, GIOCondition condition,
+            gpointer user_data);
+static gboolean timeout_handler (gpointer user_data);
 static gboolean socket_service_run_handler (GThreadedSocketService *service,
             GSocketConnection *connection, GObject *source_object,
             gpointer user_data);
@@ -478,6 +487,37 @@ hev_server_stop (HevServer *self)
 }
 
 static gboolean
+socket_source_handler (GSocket *socket,
+            GIOCondition condition,
+            gpointer user_data)
+{
+    HevServerClientData *cdat = user_data;
+
+    g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
+
+    cdat->timeout_count = 0;
+
+    return TRUE;
+}
+
+static gboolean
+timeout_handler (gpointer user_data)
+{
+    HevServerClientData *cdat = user_data;
+
+    g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
+
+    cdat->timeout_count ++;
+
+    if (HEV_SERVER_TIMEOUT_MAX_COUNT <= cdat->timeout_count) {
+        g_cancellable_cancel (cdat->cancellable);
+        return FALSE;
+    }
+
+    return TRUE;
+}
+
+static gboolean
 socket_service_run_handler (GThreadedSocketService *service,
             GSocketConnection *connection,
             GObject *source_object,
@@ -490,6 +530,8 @@ socket_service_run_handler (GThreadedSocketService *service,
     GTlsCertificate *cert = NULL;
     GIOStream *tls_stream = NULL;
     HevServerClientData *cdat = NULL;
+    GSocket *sock = NULL;
+    GSource *sock_src = NULL, *timeout_src = NULL;
     GError *error = NULL;
 
     g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
@@ -520,18 +562,44 @@ socket_service_run_handler (GThreadedSocketService *service,
         goto cdat_fail;
     }
     cdat->tls_stream = tls_stream;
+    cdat->cancellable = g_cancellable_new ();
     cdat->self = g_object_ref (self);
     cdat->loop = g_main_loop_ref (loop);
+
+    sock = g_socket_connection_get_socket (connection);
+    sock_src = g_socket_create_source (sock, G_IO_IN, NULL);
+    if (!sock_src) {
+        g_critical ("Create socket source failed!");
+        goto sock_src_fail;
+    }
+    g_source_set_callback (sock_src,
+                (GSourceFunc) socket_source_handler,
+                cdat, NULL);
+    g_source_set_priority (sock_src, G_PRIORITY_LOW);
+    g_source_attach (sock_src, context);
+    g_source_unref (sock_src);
+
+    timeout_src = g_timeout_source_new_seconds (HEV_SERVER_TIMEOUT_SECONDS);
+    g_source_set_callback (timeout_src,
+                (GSourceFunc) timeout_handler,
+                cdat, NULL);
+    g_source_set_priority (timeout_src, G_PRIORITY_LOW);
+    g_source_attach (timeout_src, context);
+    g_source_unref (timeout_src);
 
     g_object_unref (cert);
 
     g_tls_connection_handshake_async (G_TLS_CONNECTION (tls_stream),
-                G_PRIORITY_DEFAULT, NULL,
+                G_PRIORITY_DEFAULT, cdat->cancellable,
                 tls_connection_handshake_async_handler,
                 cdat);
 
     g_main_loop_run (loop);
 
+    g_source_destroy (sock_src);
+    g_source_destroy (timeout_src);
+
+    g_object_unref (cdat->cancellable);
     g_object_unref (cdat->self);
     g_main_loop_unref (cdat->loop);
     g_slice_free (HevServerClientData, cdat);
@@ -542,6 +610,10 @@ socket_service_run_handler (GThreadedSocketService *service,
 
     return FALSE;
 
+sock_src_fail:
+    g_object_unref (cdat->self);
+    g_main_loop_unref (cdat->loop);
+    g_slice_free (HevServerClientData, cdat);
 cdat_fail:
     g_object_unref (tls_stream);
 tls_stream_fail:
@@ -582,7 +654,7 @@ tls_connection_handshake_async_handler (GObject *source_object,
     g_buffered_input_stream_fill_async (
                 G_BUFFERED_INPUT_STREAM (tls_bufed_input),
                 HEV_PROTO_HEADER_REAL_SIZE, G_PRIORITY_DEFAULT,
-                NULL, buffered_input_stream_fill_async_handler,
+                cdat->cancellable, buffered_input_stream_fill_async_handler,
                 cdat);
 
     return;
@@ -635,7 +707,7 @@ buffered_input_stream_fill_async_handler (GObject *source_object,
                     G_FILTER_INPUT_STREAM (tls_bufed_input));
         g_input_stream_skip_async (tls_input,
                     header->length - HEV_PROTO_HEADER_REAL_SIZE,
-                    G_PRIORITY_DEFAULT, NULL,
+                    G_PRIORITY_DEFAULT, cdat->cancellable,
                     input_stream_skip_async_handler,
                     cdat);
     } else {
@@ -646,7 +718,7 @@ buffered_input_stream_fill_async_handler (GObject *source_object,
         tls_output = g_io_stream_get_output_stream (cdat->tls_stream);
         buffer = hev_protocol_get_invalid_message (&count);
         g_output_stream_write_async (tls_output, buffer, count,
-                    G_PRIORITY_DEFAULT, NULL,
+                    G_PRIORITY_DEFAULT, cdat->cancellable,
                     output_stream_write_async_handler,
                     cdat);
     }
@@ -694,7 +766,7 @@ input_stream_skip_async_handler (GObject *source_object,
     }
 
     g_socket_client_connect_to_host_async (priv->client,
-                priv->target_addr, priv->target_port, NULL,
+                priv->target_addr, priv->target_port, cdat->cancellable,
                 socket_client_connect_to_host_async_handler,
                 cdat);
 
@@ -758,8 +830,9 @@ socket_client_connect_to_host_async_handler (GObject *source_object,
     cdat->tgt_stream = G_IO_STREAM (conn);
 
     g_io_stream_splice_async (cdat->tgt_stream, cdat->tls_stream,
-                G_IO_STREAM_SPLICE_NONE, G_PRIORITY_DEFAULT, NULL,
-                io_stream_splice_async_handler, cdat);
+                G_IO_STREAM_SPLICE_NONE, G_PRIORITY_DEFAULT,
+                cdat->cancellable, io_stream_splice_async_handler,
+                cdat);
 
     return;
 
