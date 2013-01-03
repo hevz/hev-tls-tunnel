@@ -497,7 +497,7 @@ socket_source_handler (GSocket *socket,
 
     cdat->timeout_count = 0;
 
-    return TRUE;
+    return FALSE;
 }
 
 static gboolean
@@ -509,9 +509,33 @@ timeout_handler (gpointer user_data)
 
     cdat->timeout_count ++;
 
-    if (HEV_SERVER_TIMEOUT_MAX_COUNT <= cdat->timeout_count)
-      g_cancellable_cancel (cdat->cancellable);
+    if (HEV_SERVER_TIMEOUT_MAX_COUNT <= cdat->timeout_count) {
+        g_cancellable_cancel (cdat->cancellable);
+    } else {
+        GSocket *sock = NULL;
+        GSource *sock_src = NULL;
+        GSocketConnection *connection = NULL;
 
+        g_object_get (cdat->tls_stream,
+                    "base-io-stream",
+                    &connection,
+                    NULL);
+        sock = g_socket_connection_get_socket (connection);
+        sock_src = g_socket_create_source (sock, G_IO_IN, NULL);
+        if (!sock_src) {
+            g_critical ("Create socket source failed!");
+            goto leave;
+        }
+        g_source_set_callback (sock_src,
+                    (GSourceFunc) socket_source_handler,
+                    cdat, NULL);
+        g_source_set_priority (sock_src, G_PRIORITY_LOW);
+        g_source_attach (sock_src, g_main_loop_get_context (cdat->loop));
+        g_source_unref (sock_src);
+        g_object_unref (connection);
+    }
+
+leave:
     return TRUE;
 }
 
@@ -594,7 +618,6 @@ socket_service_run_handler (GThreadedSocketService *service,
 
     g_main_loop_run (loop);
 
-    g_source_destroy (sock_src);
     g_source_destroy (timeout_src);
 
     g_object_unref (cdat->cancellable);
