@@ -533,6 +533,22 @@ timeout_handler (gpointer user_data)
         g_source_attach (sock_src, g_main_loop_get_context (cdat->loop));
         g_source_unref (sock_src);
         g_object_unref (connection);
+
+        if (!cdat->tgt_stream)
+          goto leave;
+        sock = g_socket_connection_get_socket (
+                    G_SOCKET_CONNECTION (cdat->tgt_stream));
+        sock_src = g_socket_create_source (sock, G_IO_IN, NULL);
+        if (!sock_src) {
+            g_critical ("Create socket source failed!");
+            goto leave;
+        }
+        g_source_set_callback (sock_src,
+                    (GSourceFunc) socket_source_handler,
+                    cdat, NULL);
+        g_source_set_priority (sock_src, G_PRIORITY_LOW);
+        g_source_attach (sock_src, g_main_loop_get_context (cdat->loop));
+        g_source_unref (sock_src);
     }
 
 leave:
@@ -837,6 +853,8 @@ socket_client_connect_to_host_async_handler (GObject *source_object,
     HevServerClientData *cdat = user_data;
     GSocketConnection *conn = NULL;
     GIOStream *tls_base = NULL;
+    GSocket *sock = NULL;
+    GSource *sock_src = NULL;
     GError *error = NULL;
 
     g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
@@ -850,6 +868,19 @@ socket_client_connect_to_host_async_handler (GObject *source_object,
     }
     cdat->tgt_stream = G_IO_STREAM (conn);
 
+    sock = g_socket_connection_get_socket (conn);
+    sock_src = g_socket_create_source (sock, G_IO_IN, NULL);
+    if (!sock_src) {
+        g_critical ("Create socket source failed!");
+        goto sock_src_fail;
+    }
+    g_source_set_callback (sock_src,
+                (GSourceFunc) socket_source_handler,
+                cdat, NULL);
+    g_source_set_priority (sock_src, G_PRIORITY_LOW);
+    g_source_attach (sock_src, g_main_loop_get_context (cdat->loop));
+    g_source_unref (sock_src);
+    
     g_io_stream_splice_async (cdat->tgt_stream, cdat->tls_stream,
                 G_IO_STREAM_SPLICE_NONE, G_PRIORITY_DEFAULT,
                 cdat->cancellable, io_stream_splice_async_handler,
@@ -857,6 +888,11 @@ socket_client_connect_to_host_async_handler (GObject *source_object,
 
     return;
 
+sock_src_fail:
+    g_io_stream_close_async (cdat->tgt_stream,
+                G_PRIORITY_DEFAULT, NULL,
+                io_stream_close_async_handler,
+                cdat);
 connect_fail:
     g_object_get (cdat->tls_stream,
                 "base-io-stream", &tls_base,
