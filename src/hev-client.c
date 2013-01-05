@@ -45,7 +45,6 @@ struct _HevClientClientData
     GIOStream *lcl_stream;
 
     HevClient *self;
-    GMainLoop *loop;
     guint8 proto_header[HEV_PROTO_HEADER_MAXN_SIZE];
 };
 
@@ -55,7 +54,7 @@ static void hev_client_async_initable_init_async (GAsyncInitable *initable,
             GAsyncReadyCallback callback, gpointer user_data);
 static gboolean hev_client_async_initable_init_finish (GAsyncInitable *initable,
             GAsyncResult *result, GError **error);
-static gboolean socket_service_run_handler (GThreadedSocketService *service,
+static gboolean socket_service_incoming_handler (GSocketService *service,
             GSocketConnection *connection, GObject *source_object,
             gpointer user_data);
 static void socket_client_connect_to_host_async_handler (GObject *source_object,
@@ -91,7 +90,7 @@ hev_client_dispose (GObject *obj)
 
     if (priv->service) {
         g_signal_handlers_disconnect_by_func (priv->service,
-                    G_CALLBACK (socket_service_run_handler),
+                    G_CALLBACK (socket_service_incoming_handler),
                     self);
         g_object_unref (priv->service);
         priv->service = NULL;
@@ -297,7 +296,7 @@ async_result_run_in_thread_handler (GSimpleAsyncResult *simple,
 
     g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
 
-    priv->service = g_threaded_socket_service_new (-1);
+    priv->service = g_socket_service_new ();
     if (!priv->service) {
         g_simple_async_result_set_error (simple,
                     HEV_CLIENT_ERROR,
@@ -320,8 +319,8 @@ async_result_run_in_thread_handler (GSimpleAsyncResult *simple,
     g_object_unref (saddr);
     g_object_unref (iaddr);
 
-    g_signal_connect (priv->service, "run",
-                G_CALLBACK (socket_service_run_handler),
+    g_signal_connect (priv->service, "incoming",
+                G_CALLBACK (socket_service_incoming_handler),
                 self);
 
     priv->client = g_socket_client_new ();
@@ -445,22 +444,16 @@ hev_client_stop (HevClient *self)
 }
 
 static gboolean
-socket_service_run_handler (GThreadedSocketService *service,
+socket_service_incoming_handler (GSocketService *service,
             GSocketConnection *connection,
             GObject *source_object,
             gpointer user_data)
 {
     HevClient *self = HEV_CLIENT (user_data);
     HevClientPrivate *priv = HEV_CLIENT_GET_PRIVATE (self);
-    GMainContext *context = NULL;
-    GMainLoop *loop = NULL;
     HevClientClientData *cdat = NULL;
 
     g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
-
-    context = g_main_context_new ();
-    loop = g_main_loop_new (context, FALSE);
-    g_main_context_push_thread_default (context);
 
     cdat = g_slice_new0 (HevClientClientData);
     if (!cdat) {
@@ -469,29 +462,15 @@ socket_service_run_handler (GThreadedSocketService *service,
     }
     cdat->lcl_stream = G_IO_STREAM (g_object_ref (connection));
     cdat->self = g_object_ref (self);
-    cdat->loop = g_main_loop_ref (loop);
 
     g_socket_client_connect_to_host_async (priv->client,
                 priv->server_addr, priv->server_port, NULL,
                 socket_client_connect_to_host_async_handler,
                 cdat);
 
-    g_main_loop_run (loop);
-
-    g_object_unref (cdat->self);
-    g_main_loop_unref (cdat->loop);
-    g_slice_free (HevClientClientData, cdat);
-
-    g_main_context_pop_thread_default (context);
-    g_main_loop_unref (loop);
-    g_main_context_unref (context);
-
     return FALSE;
 
 cdat_fail:
-    g_main_context_pop_thread_default (context);
-    g_main_loop_unref (loop);
-    g_main_context_unref (context);
 
     return FALSE;
 }
@@ -646,8 +625,10 @@ io_stream_close_async_handler (GObject *source_object,
       cdat->lcl_stream = NULL;
     g_object_unref (source_object);
 
-    if (!cdat->tls_stream && !cdat->lcl_stream)
-      g_main_loop_quit (cdat->loop);
+    if (!cdat->tls_stream && !cdat->lcl_stream) {
+        g_object_unref (cdat->self);
+        g_slice_free (HevClientClientData, cdat);
+    }
 }
 
 static gboolean
