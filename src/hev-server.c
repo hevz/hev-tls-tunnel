@@ -648,6 +648,7 @@ socket_service_run_handler (GThreadedSocketService *service,
     return FALSE;
 
 sock_src_fail:
+    g_object_unref (cdat->cancellable);
     g_object_unref (cdat->self);
     g_main_loop_unref (cdat->loop);
     g_slice_free (HevServerClientData, cdat);
