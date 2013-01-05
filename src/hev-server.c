@@ -507,9 +507,7 @@ timeout_handler (gpointer user_data)
 
     g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
 
-    cdat->timeout_count ++;
-
-    if (HEV_SERVER_TIMEOUT_MAX_COUNT <= cdat->timeout_count) {
+    if (HEV_SERVER_TIMEOUT_MAX_COUNT < cdat->timeout_count) {
         g_cancellable_cancel (cdat->cancellable);
     } else {
         GSocket *sock = NULL;
@@ -552,6 +550,8 @@ timeout_handler (gpointer user_data)
     }
 
 leave:
+    cdat->timeout_count ++;
+
     return TRUE;
 }
 
