@@ -42,6 +42,9 @@ struct _HevServerPrivate
 
     GSocketService *service;
     GSocketClient *client;
+    GSList *client_list;
+
+    guint timeout_id;
 };
 
 struct _HevServerClientData
@@ -53,7 +56,8 @@ struct _HevServerClientData
     GCancellable *cancellable;
 
     HevServer *self;
-    guint timeout_id;
+    guint tls_sock_id;
+    guint tgt_sock_id;
 };
 
 static void hev_server_async_initable_iface_init (GAsyncInitableIface *iface);
@@ -64,6 +68,8 @@ static gboolean hev_server_async_initable_init_finish (GAsyncInitable *initable,
             GAsyncResult *result, GError **error);
 static gboolean socket_source_handler (GSocket *socket, GIOCondition condition,
             gpointer user_data);
+static void client_list_free_handler (gpointer data);
+static void client_list_foreach_handler (gpointer data, gpointer user_data);
 static gboolean timeout_handler (gpointer user_data);
 static gboolean socket_service_incoming_handler (GSocketService *service,
             GSocketConnection *connection, GObject *source_object,
@@ -102,6 +108,11 @@ hev_server_dispose (GObject *obj)
 
     g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
 
+    if (priv->timeout_id) {
+        g_source_remove (priv->timeout_id);
+        priv->timeout_id = 0;
+    }
+
     if (priv->service) {
         g_signal_handlers_disconnect_by_func (priv->service,
                     G_CALLBACK (socket_service_incoming_handler),
@@ -113,6 +124,12 @@ hev_server_dispose (GObject *obj)
     if (priv->client) {
         g_object_unref (priv->client);
         priv->client = NULL;
+    }
+
+    if (priv->client_list) {
+        g_slist_free_full (priv->client_list,
+                    client_list_free_handler);
+        priv->client_list = NULL;
     }
 
     G_OBJECT_CLASS (hev_server_parent_class)->dispose (obj);
@@ -373,6 +390,10 @@ async_result_run_in_thread_handler (GSimpleAsyncResult *simple,
         goto client_fail;
     }
 
+    priv->timeout_id = g_timeout_add_seconds (
+                HEV_SERVER_TIMEOUT_SECONDS,
+                timeout_handler, self);
+
     return;
 
 client_fail:
@@ -500,10 +521,33 @@ socket_source_handler (GSocket *socket,
     return FALSE;
 }
 
-static gboolean
-timeout_handler (gpointer user_data)
+static void
+client_list_free_handler (gpointer data)
 {
-    HevServerClientData *cdat = user_data;
+    HevServerClientData *cdat = data;
+    GIOStream *tls_base = NULL;
+
+    g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
+
+    g_object_get (cdat->tls_stream,
+                "base-io-stream", &tls_base,
+                NULL);
+    g_io_stream_close_async (tls_base,
+                G_PRIORITY_DEFAULT, NULL,
+                io_stream_close_async_handler,
+                cdat);
+    g_object_unref (cdat->tls_stream);
+    cdat->tls_stream = tls_base;
+    g_io_stream_close_async (cdat->tgt_stream,
+                G_PRIORITY_DEFAULT, NULL,
+                io_stream_close_async_handler,
+                cdat);
+}
+
+static void
+client_list_foreach_handler (gpointer data, gpointer user_data)
+{
+    HevServerClientData *cdat = data;
 
     g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
 
@@ -514,6 +558,7 @@ timeout_handler (gpointer user_data)
         GSource *sock_src = NULL;
         GSocketConnection *connection = NULL;
 
+        g_source_remove (cdat->tls_sock_id);
         g_object_get (cdat->tls_stream,
                     "base-io-stream",
                     &connection,
@@ -528,12 +573,13 @@ timeout_handler (gpointer user_data)
                     (GSourceFunc) socket_source_handler,
                     cdat, NULL);
         g_source_set_priority (sock_src, G_PRIORITY_LOW);
-        g_source_attach (sock_src, NULL);
+        cdat->tls_sock_id = g_source_attach (sock_src, NULL);
         g_source_unref (sock_src);
         g_object_unref (connection);
 
         if (!cdat->tgt_stream)
           goto leave;
+        g_source_remove (cdat->tgt_sock_id);
         sock = g_socket_connection_get_socket (
                     G_SOCKET_CONNECTION (cdat->tgt_stream));
         sock_src = g_socket_create_source (sock, G_IO_IN, NULL);
@@ -545,12 +591,26 @@ timeout_handler (gpointer user_data)
                     (GSourceFunc) socket_source_handler,
                     cdat, NULL);
         g_source_set_priority (sock_src, G_PRIORITY_LOW);
-        g_source_attach (sock_src, NULL);
+        cdat->tgt_sock_id = g_source_attach (sock_src, NULL);
         g_source_unref (sock_src);
     }
 
 leave:
     cdat->timeout_count ++;
+
+    return;
+}
+
+static gboolean
+timeout_handler (gpointer user_data)
+{
+    HevServer *self = HEV_SERVER (user_data);
+    HevServerPrivate *priv = HEV_SERVER_GET_PRIVATE (self);
+
+    g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
+
+    g_slist_foreach (priv->client_list,
+                client_list_foreach_handler, self);
 
     return TRUE;
 }
@@ -607,14 +667,13 @@ socket_service_incoming_handler (GSocketService *service,
                 (GSourceFunc) socket_source_handler,
                 cdat, NULL);
     g_source_set_priority (sock_src, G_PRIORITY_LOW);
-    g_source_attach (sock_src, NULL);
+    cdat->tls_sock_id = g_source_attach (sock_src, NULL);
     g_source_unref (sock_src);
 
-    cdat->timeout_id = g_timeout_add_seconds (
-                HEV_SERVER_TIMEOUT_SECONDS,
-                timeout_handler, cdat);
-
     g_object_unref (cert);
+
+    priv->client_list = g_slist_append (priv->client_list,
+                cdat);
 
     g_tls_connection_handshake_async (G_TLS_CONNECTION (tls_stream),
                 G_PRIORITY_DEFAULT, cdat->cancellable,
@@ -851,7 +910,7 @@ socket_client_connect_to_host_async_handler (GObject *source_object,
                 (GSourceFunc) socket_source_handler,
                 cdat, NULL);
     g_source_set_priority (sock_src, G_PRIORITY_LOW);
-    g_source_attach (sock_src, NULL);
+    cdat->tgt_sock_id = g_source_attach (sock_src, NULL);
     g_source_unref (sock_src);
     
     g_io_stream_splice_async (cdat->tgt_stream, cdat->tls_stream,
@@ -915,23 +974,29 @@ io_stream_close_async_handler (GObject *source_object,
             GAsyncResult *res, gpointer user_data)
 {
     HevServerClientData *cdat = user_data;
+    HevServerPrivate *priv = HEV_SERVER_GET_PRIVATE (cdat->self);
 
     g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
 
     g_io_stream_close_finish (G_IO_STREAM (source_object),
                 res, NULL);
 
-    if (G_IO_STREAM (source_object) == cdat->tls_stream)
-      cdat->tls_stream = NULL;
-    else if (G_IO_STREAM (source_object) == cdat->tgt_stream)
-      cdat->tgt_stream = NULL;
+    if (G_IO_STREAM (source_object) == cdat->tls_stream) {
+        g_source_remove (cdat->tls_sock_id);
+        cdat->tls_stream = NULL;
+    }
+    else if (G_IO_STREAM (source_object) == cdat->tgt_stream) {
+        g_source_remove (cdat->tgt_sock_id);
+        cdat->tgt_stream = NULL;
+    }
     g_object_unref (source_object);
 
     if (!cdat->tls_stream && !cdat->tgt_stream) {
-        g_source_remove (cdat->timeout_id);
         g_object_unref (cdat->cancellable);
         g_object_unref (cdat->self);
         g_slice_free (HevServerClientData, cdat);
+        priv->client_list = g_slist_remove (priv->client_list,
+                    cdat);
     }
 }
 
