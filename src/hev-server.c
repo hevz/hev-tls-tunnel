@@ -593,7 +593,7 @@ client_list_foreach_handler (gpointer data, gpointer user_data)
         g_source_set_callback (sock_src,
                     (GSourceFunc) socket_source_handler,
                     cdat, NULL);
-        g_source_set_priority (sock_src, G_PRIORITY_LOW);
+        g_source_set_priority (sock_src, G_PRIORITY_HIGH);
         cdat->tls_sock_id = g_source_attach (sock_src, NULL);
         g_source_unref (sock_src);
         g_object_unref (connection);
@@ -611,7 +611,7 @@ client_list_foreach_handler (gpointer data, gpointer user_data)
         g_source_set_callback (sock_src,
                     (GSourceFunc) socket_source_handler,
                     cdat, NULL);
-        g_source_set_priority (sock_src, G_PRIORITY_LOW);
+        g_source_set_priority (sock_src, G_PRIORITY_HIGH);
         cdat->tgt_sock_id = g_source_attach (sock_src, NULL);
         g_source_unref (sock_src);
     }
@@ -687,7 +687,7 @@ socket_service_incoming_handler (GSocketService *service,
     g_source_set_callback (sock_src,
                 (GSourceFunc) socket_source_handler,
                 cdat, NULL);
-    g_source_set_priority (sock_src, G_PRIORITY_LOW);
+    g_source_set_priority (sock_src, G_PRIORITY_HIGH);
     cdat->tls_sock_id = g_source_attach (sock_src, NULL);
     g_source_unref (sock_src);
 
@@ -930,7 +930,7 @@ socket_client_connect_to_host_async_handler (GObject *source_object,
     g_source_set_callback (sock_src,
                 (GSourceFunc) socket_source_handler,
                 cdat, NULL);
-    g_source_set_priority (sock_src, G_PRIORITY_LOW);
+    g_source_set_priority (sock_src, G_PRIORITY_HIGH);
     cdat->tgt_sock_id = g_source_attach (sock_src, NULL);
     g_source_unref (sock_src);
     
