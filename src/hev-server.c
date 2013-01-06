@@ -552,7 +552,28 @@ client_list_foreach_handler (gpointer data, gpointer user_data)
     g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
 
     if (HEV_SERVER_TIMEOUT_MAX_COUNT < cdat->timeout_count) {
-        g_cancellable_cancel (cdat->cancellable);
+        if (g_cancellable_is_cancelled (cdat->cancellable)) {
+            if (cdat->tls_stream) {
+                GIOStream *tls_base = NULL;
+                g_object_get (cdat->tls_stream,
+                            "base-io-stream", &tls_base,
+                            NULL);
+                g_io_stream_close_async (tls_base,
+                            G_PRIORITY_DEFAULT, NULL,
+                            io_stream_close_async_handler,
+                            cdat);
+                g_object_unref (cdat->tls_stream);
+                cdat->tls_stream = tls_base;
+            }
+            if (cdat->tgt_stream) {
+                g_io_stream_close_async (cdat->tgt_stream,
+                            G_PRIORITY_DEFAULT, NULL,
+                            io_stream_close_async_handler,
+                            cdat);
+            }
+        } else {
+            g_cancellable_cancel (cdat->cancellable);
+        }
     } else {
         GSocket *sock = NULL;
         GSource *sock_src = NULL;
