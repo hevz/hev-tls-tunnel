@@ -519,7 +519,7 @@ socket_source_handler (GSocket *socket,
 
     cdat->timeout_count = 0;
 
-    return FALSE;
+    return G_SOURCE_REMOVE;
 }
 
 static void

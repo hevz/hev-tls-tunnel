@@ -10,7 +10,7 @@
 
 #include "hev-utils.h"
 
-#define HEV_SOCKET_IO_STREAM_SPLICE_BUFFER_SIZE 2048
+#define HEV_SOCKET_IO_STREAM_SPLICE_BUFFER_SIZE 4096
 
 typedef enum _HevSocketIOStreamSpliceStatus HevSocketIOStreamSpliceStatus;
 
@@ -158,7 +158,7 @@ hev_socket_io_stream_splice_sock1_source_handler (GSocket *socket,
                     simple);
     }
 
-    return TRUE;
+    return G_SOURCE_CONTINUE;
 }
 
 static gboolean
@@ -184,7 +184,7 @@ hev_socket_io_stream_splice_sock2_source_handler (GSocket *socket,
                     simple);
     }
 
-    return TRUE;;
+    return G_SOURCE_CONTINUE;
 }
 
 static void
