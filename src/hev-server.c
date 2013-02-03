@@ -10,6 +10,7 @@
 
 #include "hev-server.h"
 #include "hev-protocol.h"
+#include "hev-utils.h"
 
 #define HEV_SERVER_TIMEOUT_SECONDS      20
 #define HEV_SERVER_TIMEOUT_MAX_COUNT    3
@@ -906,7 +907,7 @@ socket_client_connect_to_host_async_handler (GObject *source_object,
     HevServerClientData *cdat = user_data;
     GSocketConnection *conn = NULL;
     GIOStream *tls_base = NULL;
-    GSocket *sock = NULL;
+    GSocket *sock = NULL, *sock2 = NULL;
     GSource *sock_src = NULL;
     GError *error = NULL;
 
@@ -934,10 +935,14 @@ socket_client_connect_to_host_async_handler (GObject *source_object,
     cdat->tgt_sock_id = g_source_attach (sock_src, NULL);
     g_source_unref (sock_src);
     
-    g_io_stream_splice_async (cdat->tgt_stream, cdat->tls_stream,
-                G_IO_STREAM_SPLICE_NONE, G_PRIORITY_DEFAULT,
-                cdat->cancellable, io_stream_splice_async_handler,
-                cdat);
+    g_object_get (cdat->tls_stream,
+                "base-io-stream", &tls_base,
+                NULL);
+    sock2 = g_socket_connection_get_socket (G_SOCKET_CONNECTION (tls_base));
+    hev_socket_io_stream_splice_async (sock, cdat->tgt_stream,
+                sock2, cdat->tls_stream, G_PRIORITY_DEFAULT,
+                cdat->cancellable, io_stream_splice_async_handler, cdat);
+    g_object_unref (tls_base);
 
     return;
 
@@ -970,7 +975,7 @@ io_stream_splice_async_handler (GObject *source_object,
 
     g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
 
-    if (!g_io_stream_splice_finish (res, &error)) {
+    if (!hev_socket_io_stream_splice_finish (res, &error)) {
         g_debug ("Splice tls and target stream failed: %s", error->message);
         g_clear_error (&error);
     }
