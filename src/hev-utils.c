@@ -155,10 +155,10 @@ hev_socket_io_stream_splice_sock1_source_handler (GSocket *socket,
                     HEV_SOCKET_IO_STREAM_SPLICE_BUFFER_SIZE,
                     data->io_priority, data->cancellable,
                     hev_socket_io_stream_splice_stream1_read_async_handler,
-                    simple);
+                    g_object_ref (simple));
     }
 
-    return G_SOURCE_CONTINUE;
+    return G_SOURCE_REMOVE;
 }
 
 static gboolean
@@ -181,10 +181,10 @@ hev_socket_io_stream_splice_sock2_source_handler (GSocket *socket,
                     HEV_SOCKET_IO_STREAM_SPLICE_BUFFER_SIZE,
                     data->io_priority, data->cancellable,
                     hev_socket_io_stream_splice_stream2_read_async_handler,
-                    simple);
+                    g_object_ref (simple));
     }
 
-    return G_SOURCE_CONTINUE;
+    return G_SOURCE_REMOVE;
 }
 
 static void
@@ -201,13 +201,15 @@ hev_socket_io_stream_splice_stream1_read_async_handler (GObject *source_object,
     data->buffer1_size = g_input_stream_read_finish (G_INPUT_STREAM (source_object),
                 res, &error);
     if (0 >= data->buffer1_size) {
-        data->s1_status = HEV_SOCKET_IO_STREAM_SPLICE_STATUS_END;
-        if (error)
-          g_simple_async_result_take_error (simple, error);
-        g_simple_async_result_complete (simple);
-        g_source_destroy (data->sock1_src);
-        if (HEV_SOCKET_IO_STREAM_SPLICE_STATUS_READING != data->s2_status)
-          g_source_destroy (data->sock2_src);
+        if (HEV_SOCKET_IO_STREAM_SPLICE_STATUS_END != data->s2_status) {
+            data->s1_status = HEV_SOCKET_IO_STREAM_SPLICE_STATUS_END;
+            if (error)
+              g_simple_async_result_take_error (simple, error);
+            g_simple_async_result_complete (simple);
+            g_object_unref (simple);
+            if (HEV_SOCKET_IO_STREAM_SPLICE_STATUS_NULL == data->s2_status)
+              g_source_destroy (data->sock2_src);
+        }
     } else {
         GOutputStream *out = g_io_stream_get_output_stream (data->stream2);
         g_output_stream_write_async (out, data->buffer1, data->buffer1_size,
@@ -232,10 +234,14 @@ hev_socket_io_stream_splice_stream2_write_async_handler (GObject *source_object,
     size = g_output_stream_write_finish (G_OUTPUT_STREAM (source_object),
                 res, &error);
     if (-1 == size) {
-        g_simple_async_result_take_error (simple, error);
-        g_simple_async_result_complete (simple);
-        g_source_destroy (data->sock1_src);
-        g_source_destroy (data->sock2_src);
+        if (HEV_SOCKET_IO_STREAM_SPLICE_STATUS_END != data->s2_status) {
+            data->s1_status = HEV_SOCKET_IO_STREAM_SPLICE_STATUS_END;
+            g_simple_async_result_take_error (simple, error);
+            g_simple_async_result_complete (simple);
+            g_object_unref (simple);
+            if (HEV_SOCKET_IO_STREAM_SPLICE_STATUS_NULL == data->s2_status)
+              g_source_destroy (data->sock2_src);
+        }
     } else {
         data->buffer1_curr += size;
         if (data->buffer1_curr < data->buffer1_size) {
@@ -247,6 +253,15 @@ hev_socket_io_stream_splice_stream2_write_async_handler (GObject *source_object,
                         simple);
         } else {
             data->s1_status = HEV_SOCKET_IO_STREAM_SPLICE_STATUS_NULL;
+
+            data->sock1_src = g_socket_create_source (data->sock1, G_IO_IN,
+                        data->cancellable);
+            g_source_set_callback (data->sock1_src,
+                        (GSourceFunc) hev_socket_io_stream_splice_sock1_source_handler,
+                        simple, (GDestroyNotify) g_object_unref);
+            g_source_set_priority (data->sock1_src, data->io_priority);
+            g_source_attach (data->sock1_src, NULL);
+            g_source_unref (data->sock1_src);
         }
     }
 }
@@ -265,13 +280,15 @@ hev_socket_io_stream_splice_stream2_read_async_handler (GObject *source_object,
     data->buffer2_size = g_input_stream_read_finish (G_INPUT_STREAM (source_object),
                 res, &error);
     if (0 >= data->buffer2_size) {
-        data->s2_status = HEV_SOCKET_IO_STREAM_SPLICE_STATUS_END;
-        if (error)
-          g_simple_async_result_take_error (simple, error);
-        g_simple_async_result_complete (simple);
-        g_source_destroy (data->sock2_src);
-        if (HEV_SOCKET_IO_STREAM_SPLICE_STATUS_READING != data->s1_status)
-          g_source_destroy (data->sock1_src);
+        if (HEV_SOCKET_IO_STREAM_SPLICE_STATUS_END != data->s1_status) {
+            data->s2_status = HEV_SOCKET_IO_STREAM_SPLICE_STATUS_END;
+            if (error)
+              g_simple_async_result_take_error (simple, error);
+            g_simple_async_result_complete (simple);
+            g_object_unref (simple);
+            if (HEV_SOCKET_IO_STREAM_SPLICE_STATUS_NULL == data->s1_status)
+              g_source_destroy (data->sock1_src);
+        }
     } else {
         GOutputStream *out = g_io_stream_get_output_stream (data->stream1);
         g_output_stream_write_async (out, data->buffer2, data->buffer2_size,
@@ -296,10 +313,14 @@ hev_socket_io_stream_splice_stream1_write_async_handler (GObject *source_object,
     size = g_output_stream_write_finish (G_OUTPUT_STREAM (source_object),
                 res, &error);
     if (-1 == size) {
-        g_simple_async_result_take_error (simple, error);
-        g_simple_async_result_complete (simple);
-        g_source_destroy (data->sock1_src);
-        g_source_destroy (data->sock2_src);
+        if (HEV_SOCKET_IO_STREAM_SPLICE_STATUS_END != data->s1_status) {
+            data->s2_status = HEV_SOCKET_IO_STREAM_SPLICE_STATUS_END;
+            g_simple_async_result_take_error (simple, error);
+            g_simple_async_result_complete (simple);
+            g_object_unref (simple);
+            if (HEV_SOCKET_IO_STREAM_SPLICE_STATUS_NULL == data->s1_status)
+              g_source_destroy (data->sock1_src);
+        }
     } else {
         data->buffer2_curr += size;
         if (data->buffer2_curr < data->buffer2_size) {
@@ -311,6 +332,15 @@ hev_socket_io_stream_splice_stream1_write_async_handler (GObject *source_object,
                         simple);
         } else {
             data->s2_status = HEV_SOCKET_IO_STREAM_SPLICE_STATUS_NULL;
+
+            data->sock2_src = g_socket_create_source (data->sock2, G_IO_IN,
+                        data->cancellable);
+            g_source_set_callback (data->sock2_src,
+                        (GSourceFunc) hev_socket_io_stream_splice_sock2_source_handler,
+                        simple, (GDestroyNotify) g_object_unref);
+            g_source_set_priority (data->sock2_src, data->io_priority);
+            g_source_attach (data->sock2_src, NULL);
+            g_source_unref (data->sock2_src);
         }
     }
 }
