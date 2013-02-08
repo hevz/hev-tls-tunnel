@@ -17,8 +17,9 @@ G_BEGIN_DECLS
 
 void hev_socket_io_stream_splice_async (GSocket *sock1, GIOStream *stream1,
             GSocket *sock2, GIOStream *stream2, gint io_priority,
-            GCancellable *cancellable, GAsyncReadyCallback callback,
-            gpointer user_data);
+            GFunc preread_callback, GFunc prewrite_callback,
+            gpointer callback_data, GCancellable *cancellable,
+            GAsyncReadyCallback callback, gpointer user_data);
 
 gboolean hev_socket_io_stream_splice_finish (GAsyncResult *result,
             GError **error);

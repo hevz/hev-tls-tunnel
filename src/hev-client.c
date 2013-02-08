@@ -562,8 +562,8 @@ output_stream_write_async_handler (GObject *source_object,
                 NULL);
     sock2 = g_socket_connection_get_socket (G_SOCKET_CONNECTION (tls_base));
     hev_socket_io_stream_splice_async (sock, cdat->lcl_stream,
-                sock2, cdat->tls_stream, G_PRIORITY_DEFAULT, NULL,
-                io_stream_splice_async_handler, cdat);
+                sock2, cdat->tls_stream, G_PRIORITY_DEFAULT, NULL, NULL, NULL,
+                NULL, io_stream_splice_async_handler, cdat);
     g_object_unref (tls_base);
 
     return;

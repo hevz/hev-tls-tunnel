@@ -31,6 +31,9 @@ struct _HevSocketIOStreamSpliceData
     GIOStream *stream2;
     GCancellable *cancellable;
     gint io_priority;
+    GFunc preread_callback;
+    GFunc prewrite_callback;
+    gpointer callback_data;
 
     GSource *sock1_src;
     GSource *sock2_src;
@@ -64,8 +67,9 @@ static void hev_socket_io_stream_splice_stream1_write_async_handler (GObject *so
 void
 hev_socket_io_stream_splice_async (GSocket *sock1, GIOStream *stream1,
             GSocket *sock2, GIOStream *stream2, gint io_priority,
-            GCancellable *cancellable, GAsyncReadyCallback callback,
-            gpointer user_data)
+            GFunc preread_callback, GFunc prewrite_callback,
+            gpointer callback_data, GCancellable *cancellable,
+            GAsyncReadyCallback callback, gpointer user_data)
 {
     GSimpleAsyncResult *simple = NULL;
     HevSocketIOStreamSpliceData *data = NULL;
@@ -80,6 +84,9 @@ hev_socket_io_stream_splice_async (GSocket *sock1, GIOStream *stream1,
     if (cancellable)
       data->cancellable = g_object_ref (cancellable);
     data->io_priority = io_priority;
+    data->preread_callback = preread_callback;
+    data->prewrite_callback = prewrite_callback;
+    data->callback_data = callback_data;
     
     simple = g_simple_async_result_new (G_OBJECT (sock1),
                 callback, user_data, hev_socket_io_stream_splice_async);
@@ -151,6 +158,8 @@ hev_socket_io_stream_splice_sock1_source_handler (GSocket *socket,
 
         data->s1_status = HEV_SOCKET_IO_STREAM_SPLICE_STATUS_READING;
         in = g_io_stream_get_input_stream (data->stream1);
+        if (data->preread_callback)
+          data->preread_callback (socket, data->callback_data);
         g_input_stream_read_async (in, data->buffer1,
                     HEV_SOCKET_IO_STREAM_SPLICE_BUFFER_SIZE,
                     data->io_priority, data->cancellable,
@@ -177,6 +186,8 @@ hev_socket_io_stream_splice_sock2_source_handler (GSocket *socket,
 
         data->s2_status = HEV_SOCKET_IO_STREAM_SPLICE_STATUS_READING;
         in = g_io_stream_get_input_stream (data->stream2);
+        if (data->preread_callback)
+          data->preread_callback (socket, data->callback_data);
         g_input_stream_read_async (in, data->buffer2,
                     HEV_SOCKET_IO_STREAM_SPLICE_BUFFER_SIZE,
                     data->io_priority, data->cancellable,
@@ -213,6 +224,8 @@ hev_socket_io_stream_splice_stream1_read_async_handler (GObject *source_object,
           g_object_unref (simple);
     } else {
         GOutputStream *out = g_io_stream_get_output_stream (data->stream2);
+        if (data->prewrite_callback)
+          data->prewrite_callback (data->sock2, data->callback_data);
         g_output_stream_write_async (out, data->buffer1, data->buffer1_size,
                     data->io_priority, data->cancellable,
                     hev_socket_io_stream_splice_stream2_write_async_handler,
@@ -294,6 +307,8 @@ hev_socket_io_stream_splice_stream2_read_async_handler (GObject *source_object,
           g_object_unref (simple);
     } else {
         GOutputStream *out = g_io_stream_get_output_stream (data->stream1);
+        if (data->prewrite_callback)
+          data->prewrite_callback (data->sock1, data->callback_data);
         g_output_stream_write_async (out, data->buffer2, data->buffer2_size,
                     data->io_priority, data->cancellable,
                     hev_socket_io_stream_splice_stream1_write_async_handler,

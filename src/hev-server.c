@@ -57,8 +57,6 @@ struct _HevServerClientData
     GCancellable *cancellable;
 
     HevServer *self;
-    guint tls_sock_id;
-    guint tgt_sock_id;
 };
 
 static void hev_server_async_initable_iface_init (GAsyncInitableIface *iface);
@@ -67,8 +65,7 @@ static void hev_server_async_initable_init_async (GAsyncInitable *initable,
             GAsyncReadyCallback callback, gpointer user_data);
 static gboolean hev_server_async_initable_init_finish (GAsyncInitable *initable,
             GAsyncResult *result, GError **error);
-static gboolean socket_source_handler (GSocket *socket, GIOCondition condition,
-            gpointer user_data);
+static void socket_splice_preread_handler (gpointer data, gpointer user_data);
 static void client_list_free_handler (gpointer data);
 static void client_list_foreach_handler (gpointer data, gpointer user_data);
 static gboolean timeout_handler (gpointer user_data);
@@ -508,18 +505,14 @@ hev_server_stop (HevServer *self)
     g_socket_service_stop (priv->service);
 }
 
-static gboolean
-socket_source_handler (GSocket *socket,
-            GIOCondition condition,
-            gpointer user_data)
+static void
+socket_splice_preread_handler (gpointer data, gpointer user_data)
 {
     HevServerClientData *cdat = user_data;
 
     g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
 
     cdat->timeout_count = 0;
-
-    return G_SOURCE_REMOVE;
 }
 
 static void
@@ -575,49 +568,8 @@ client_list_foreach_handler (gpointer data, gpointer user_data)
         } else {
             g_cancellable_cancel (cdat->cancellable);
         }
-    } else {
-        GSocket *sock = NULL;
-        GSource *sock_src = NULL;
-        GSocketConnection *connection = NULL;
-
-        g_source_remove (cdat->tls_sock_id);
-        g_object_get (cdat->tls_stream,
-                    "base-io-stream",
-                    &connection,
-                    NULL);
-        sock = g_socket_connection_get_socket (connection);
-        sock_src = g_socket_create_source (sock, G_IO_IN, NULL);
-        if (!sock_src) {
-            g_critical ("Create socket source failed!");
-            goto leave;
-        }
-        g_source_set_callback (sock_src,
-                    (GSourceFunc) socket_source_handler,
-                    cdat, NULL);
-        g_source_set_priority (sock_src, G_PRIORITY_HIGH);
-        cdat->tls_sock_id = g_source_attach (sock_src, NULL);
-        g_source_unref (sock_src);
-        g_object_unref (connection);
-
-        if (!cdat->tgt_stream)
-          goto leave;
-        g_source_remove (cdat->tgt_sock_id);
-        sock = g_socket_connection_get_socket (
-                    G_SOCKET_CONNECTION (cdat->tgt_stream));
-        sock_src = g_socket_create_source (sock, G_IO_IN, NULL);
-        if (!sock_src) {
-            g_critical ("Create socket source failed!");
-            goto leave;
-        }
-        g_source_set_callback (sock_src,
-                    (GSourceFunc) socket_source_handler,
-                    cdat, NULL);
-        g_source_set_priority (sock_src, G_PRIORITY_HIGH);
-        cdat->tgt_sock_id = g_source_attach (sock_src, NULL);
-        g_source_unref (sock_src);
     }
 
-leave:
     cdat->timeout_count ++;
 
     return;
@@ -648,8 +600,6 @@ socket_service_incoming_handler (GSocketService *service,
     GTlsCertificate *cert = NULL;
     GIOStream *tls_stream = NULL;
     HevServerClientData *cdat = NULL;
-    GSocket *sock = NULL;
-    GSource *sock_src = NULL;
     GError *error = NULL;
 
     g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
@@ -679,19 +629,6 @@ socket_service_incoming_handler (GSocketService *service,
     cdat->cancellable = g_cancellable_new ();
     cdat->self = g_object_ref (self);
 
-    sock = g_socket_connection_get_socket (connection);
-    sock_src = g_socket_create_source (sock, G_IO_IN, NULL);
-    if (!sock_src) {
-        g_critical ("Create socket source failed!");
-        goto sock_src_fail;
-    }
-    g_source_set_callback (sock_src,
-                (GSourceFunc) socket_source_handler,
-                cdat, NULL);
-    g_source_set_priority (sock_src, G_PRIORITY_HIGH);
-    cdat->tls_sock_id = g_source_attach (sock_src, NULL);
-    g_source_unref (sock_src);
-
     g_object_unref (cert);
 
     priv->client_list = g_slist_append (priv->client_list,
@@ -704,10 +641,6 @@ socket_service_incoming_handler (GSocketService *service,
 
     return FALSE;
 
-sock_src_fail:
-    g_object_unref (cdat->cancellable);
-    g_object_unref (cdat->self);
-    g_slice_free (HevServerClientData, cdat);
 cdat_fail:
     g_object_unref (tls_stream);
 tls_stream_fail:
@@ -908,7 +841,6 @@ socket_client_connect_to_host_async_handler (GObject *source_object,
     GSocketConnection *conn = NULL;
     GIOStream *tls_base = NULL;
     GSocket *sock = NULL, *sock2 = NULL;
-    GSource *sock_src = NULL;
     GError *error = NULL;
 
     g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
@@ -923,34 +855,19 @@ socket_client_connect_to_host_async_handler (GObject *source_object,
     cdat->tgt_stream = G_IO_STREAM (conn);
 
     sock = g_socket_connection_get_socket (conn);
-    sock_src = g_socket_create_source (sock, G_IO_IN, NULL);
-    if (!sock_src) {
-        g_critical ("Create socket source failed!");
-        goto sock_src_fail;
-    }
-    g_source_set_callback (sock_src,
-                (GSourceFunc) socket_source_handler,
-                cdat, NULL);
-    g_source_set_priority (sock_src, G_PRIORITY_HIGH);
-    cdat->tgt_sock_id = g_source_attach (sock_src, NULL);
-    g_source_unref (sock_src);
-    
     g_object_get (cdat->tls_stream,
                 "base-io-stream", &tls_base,
                 NULL);
     sock2 = g_socket_connection_get_socket (G_SOCKET_CONNECTION (tls_base));
     hev_socket_io_stream_splice_async (sock, cdat->tgt_stream,
                 sock2, cdat->tls_stream, G_PRIORITY_DEFAULT,
-                cdat->cancellable, io_stream_splice_async_handler, cdat);
+                socket_splice_preread_handler, NULL, cdat,
+                cdat->cancellable, io_stream_splice_async_handler,
+                cdat);
     g_object_unref (tls_base);
 
     return;
 
-sock_src_fail:
-    g_io_stream_close_async (cdat->tgt_stream,
-                G_PRIORITY_DEFAULT, NULL,
-                io_stream_close_async_handler,
-                cdat);
 connect_fail:
     g_object_get (cdat->tls_stream,
                 "base-io-stream", &tls_base,
@@ -1007,14 +924,10 @@ io_stream_close_async_handler (GObject *source_object,
     g_io_stream_close_finish (G_IO_STREAM (source_object),
                 res, NULL);
 
-    if (G_IO_STREAM (source_object) == cdat->tls_stream) {
-        g_source_remove (cdat->tls_sock_id);
-        cdat->tls_stream = NULL;
-    }
-    else if (G_IO_STREAM (source_object) == cdat->tgt_stream) {
-        g_source_remove (cdat->tgt_sock_id);
-        cdat->tgt_stream = NULL;
-    }
+    if (G_IO_STREAM (source_object) == cdat->tls_stream)
+      cdat->tls_stream = NULL;
+    else if (G_IO_STREAM (source_object) == cdat->tgt_stream)
+      cdat->tgt_stream = NULL;
     g_object_unref (source_object);
 
     if (!cdat->tls_stream && !cdat->tgt_stream) {
