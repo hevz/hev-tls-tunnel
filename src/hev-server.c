@@ -50,7 +50,7 @@ struct _HevServerPrivate
 
 struct _HevServerClientData
 {
-    GIOStream *tls_stream;
+    GIOStream *tun_stream;
     GIOStream *tgt_stream;
 
     guint timeout_count;
@@ -519,19 +519,13 @@ static void
 client_list_free_handler (gpointer data)
 {
     HevServerClientData *cdat = data;
-    GIOStream *tls_base = NULL;
 
     g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
 
-    g_object_get (cdat->tls_stream,
-                "base-io-stream", &tls_base,
-                NULL);
-    g_io_stream_close_async (tls_base,
+    g_io_stream_close_async (cdat->tun_stream,
                 G_PRIORITY_DEFAULT, NULL,
                 io_stream_close_async_handler,
                 cdat);
-    g_object_unref (cdat->tls_stream);
-    cdat->tls_stream = tls_base;
     g_io_stream_close_async (cdat->tgt_stream,
                 G_PRIORITY_DEFAULT, NULL,
                 io_stream_close_async_handler,
@@ -547,17 +541,11 @@ client_list_foreach_handler (gpointer data, gpointer user_data)
 
     if (HEV_SERVER_TIMEOUT_MAX_COUNT < cdat->timeout_count) {
         if (g_cancellable_is_cancelled (cdat->cancellable)) {
-            if (cdat->tls_stream) {
-                GIOStream *tls_base = NULL;
-                g_object_get (cdat->tls_stream,
-                            "base-io-stream", &tls_base,
-                            NULL);
-                g_io_stream_close_async (tls_base,
+            if (cdat->tun_stream) {
+                g_io_stream_close_async (cdat->tun_stream,
                             G_PRIORITY_DEFAULT, NULL,
                             io_stream_close_async_handler,
                             cdat);
-                g_object_unref (cdat->tls_stream);
-                cdat->tls_stream = tls_base;
             }
             if (cdat->tgt_stream) {
                 g_io_stream_close_async (cdat->tgt_stream,
@@ -598,7 +586,7 @@ socket_service_incoming_handler (GSocketService *service,
     HevServer *self = HEV_SERVER (user_data);
     HevServerPrivate *priv = HEV_SERVER_GET_PRIVATE (self);
     GTlsCertificate *cert = NULL;
-    GIOStream *tls_stream = NULL;
+    GIOStream *tun_stream = NULL;
     HevServerClientData *cdat = NULL;
     GError *error = NULL;
 
@@ -612,12 +600,12 @@ socket_service_incoming_handler (GSocketService *service,
         goto cert_fail;
     }
 
-    tls_stream = g_tls_server_connection_new (G_IO_STREAM (connection),
+    tun_stream = g_tls_server_connection_new (G_IO_STREAM (connection),
                 cert, &error);
-    if (!tls_stream) {
+    if (!tun_stream) {
         g_critical ("Create tls server connection failed: %s", error->message);
         g_clear_error (&error);
-        goto tls_stream_fail;
+        goto tun_stream_fail;
     }
 
     cdat = g_slice_new0 (HevServerClientData);
@@ -625,7 +613,7 @@ socket_service_incoming_handler (GSocketService *service,
         g_critical ("Alloc client data failed!");
         goto cdat_fail;
     }
-    cdat->tls_stream = tls_stream;
+    cdat->tun_stream = tun_stream;
     cdat->cancellable = g_cancellable_new ();
     cdat->self = g_object_ref (self);
 
@@ -634,7 +622,7 @@ socket_service_incoming_handler (GSocketService *service,
     priv->client_list = g_slist_append (priv->client_list,
                 cdat);
 
-    g_tls_connection_handshake_async (G_TLS_CONNECTION (tls_stream),
+    g_tls_connection_handshake_async (G_TLS_CONNECTION (tun_stream),
                 G_PRIORITY_DEFAULT, cdat->cancellable,
                 tls_connection_handshake_async_handler,
                 cdat);
@@ -642,8 +630,8 @@ socket_service_incoming_handler (GSocketService *service,
     return FALSE;
 
 cdat_fail:
-    g_object_unref (tls_stream);
-tls_stream_fail:
+    g_object_unref (tun_stream);
+tun_stream_fail:
     g_object_unref (cert);
 cert_fail:
 
@@ -655,9 +643,8 @@ tls_connection_handshake_async_handler (GObject *source_object,
             GAsyncResult *res, gpointer user_data)
 {
     HevServerClientData *cdat = user_data;
-    GIOStream *tls_base = NULL;
-    GInputStream *tls_input = NULL;
-    GInputStream *tls_bufed_input = NULL;
+    GInputStream *tun_input = NULL;
+    GInputStream *tun_bufed_input = NULL;
     GError *error = NULL;
 
     g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
@@ -669,14 +656,14 @@ tls_connection_handshake_async_handler (GObject *source_object,
         goto handshake_fail;
     }
 
-    tls_input = g_io_stream_get_input_stream (cdat->tls_stream);
-    tls_bufed_input = g_buffered_input_stream_new_sized (tls_input,
+    tun_input = g_io_stream_get_input_stream (cdat->tun_stream);
+    tun_bufed_input = g_buffered_input_stream_new_sized (tun_input,
                 HEV_PROTO_HEADER_REAL_SIZE);
     g_filter_input_stream_set_close_base_stream (
-                G_FILTER_INPUT_STREAM (tls_bufed_input),
+                G_FILTER_INPUT_STREAM (tun_bufed_input),
                 FALSE);
     g_buffered_input_stream_fill_async (
-                G_BUFFERED_INPUT_STREAM (tls_bufed_input),
+                G_BUFFERED_INPUT_STREAM (tun_bufed_input),
                 HEV_PROTO_HEADER_REAL_SIZE, G_PRIORITY_DEFAULT,
                 cdat->cancellable, buffered_input_stream_fill_async_handler,
                 cdat);
@@ -684,15 +671,10 @@ tls_connection_handshake_async_handler (GObject *source_object,
     return;
 
 handshake_fail:
-    g_object_get (cdat->tls_stream,
-                "base-io-stream", &tls_base,
-                NULL);
-    g_io_stream_close_async (tls_base,
+    g_io_stream_close_async (cdat->tun_stream,
                 G_PRIORITY_DEFAULT, NULL,
                 io_stream_close_async_handler,
                 cdat);
-    g_object_unref (cdat->tls_stream);
-    cdat->tls_stream = tls_base;
 
     return;
 }
@@ -702,8 +684,7 @@ buffered_input_stream_fill_async_handler (GObject *source_object,
             GAsyncResult *res, gpointer user_data)
 {
     HevServerClientData *cdat = user_data;
-    GBufferedInputStream *tls_bufed_input = NULL;
-    GIOStream *tls_base = NULL;
+    GBufferedInputStream *tun_bufed_input = NULL;
     gssize size = 0;
     const HevProtocolHeader *header = NULL;
     gsize len = 0;
@@ -711,8 +692,8 @@ buffered_input_stream_fill_async_handler (GObject *source_object,
 
     g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
 
-    tls_bufed_input = G_BUFFERED_INPUT_STREAM (source_object);
-    size = g_buffered_input_stream_fill_finish (tls_bufed_input,
+    tun_bufed_input = G_BUFFERED_INPUT_STREAM (source_object);
+    size = g_buffered_input_stream_fill_finish (tun_bufed_input,
                 res, &error);
     switch (size) {
     case -1:
@@ -723,45 +704,40 @@ buffered_input_stream_fill_async_handler (GObject *source_object,
         goto closed;
     }
 
-    header = g_buffered_input_stream_peek_buffer (tls_bufed_input, &len);
+    header = g_buffered_input_stream_peek_buffer (tun_bufed_input, &len);
     if (hev_protocol_header_is_valid (header)) {
-        GInputStream *tls_input = NULL;
+        GInputStream *tun_input = NULL;
 
-        tls_input = g_filter_input_stream_get_base_stream (
-                    G_FILTER_INPUT_STREAM (tls_bufed_input));
-        g_input_stream_skip_async (tls_input,
+        tun_input = g_filter_input_stream_get_base_stream (
+                    G_FILTER_INPUT_STREAM (tun_bufed_input));
+        g_input_stream_skip_async (tun_input,
                     header->length - HEV_PROTO_HEADER_REAL_SIZE,
                     G_PRIORITY_DEFAULT, cdat->cancellable,
                     input_stream_skip_async_handler,
                     cdat);
     } else {
-        GOutputStream *tls_output = NULL;
+        GOutputStream *tun_output = NULL;
         const gchar *buffer = NULL;
         gsize count = 0;
 
-        tls_output = g_io_stream_get_output_stream (cdat->tls_stream);
+        tun_output = g_io_stream_get_output_stream (cdat->tun_stream);
         buffer = hev_protocol_get_invalid_message (&count);
-        g_output_stream_write_async (tls_output, buffer, count,
+        g_output_stream_write_async (tun_output, buffer, count,
                     G_PRIORITY_DEFAULT, cdat->cancellable,
                     output_stream_write_async_handler,
                     cdat);
     }
 
-    g_object_unref (tls_bufed_input);
+    g_object_unref (tun_bufed_input);
 
     return;
 
 closed:
-    g_object_unref (tls_bufed_input);
-    g_object_get (cdat->tls_stream,
-                "base-io-stream", &tls_base,
-                NULL);
-    g_io_stream_close_async (tls_base,
+    g_object_unref (tun_bufed_input);
+    g_io_stream_close_async (cdat->tun_stream,
                 G_PRIORITY_DEFAULT, NULL,
                 io_stream_close_async_handler,
                 cdat);
-    g_object_unref (cdat->tls_stream);
-    cdat->tls_stream = tls_base;
 
     return;
 }
@@ -772,7 +748,6 @@ input_stream_skip_async_handler (GObject *source_object,
 {
     HevServerClientData *cdat = user_data;
     HevServerPrivate *priv = HEV_SERVER_GET_PRIVATE (cdat->self);
-    GIOStream *tls_base = NULL;
     gssize size = 0;
     GError *error = NULL;
 
@@ -797,15 +772,10 @@ input_stream_skip_async_handler (GObject *source_object,
     return;
 
 closed:
-    g_object_get (cdat->tls_stream,
-                "base-io-stream", &tls_base,
-                NULL);
-    g_io_stream_close_async (tls_base,
+    g_io_stream_close_async (cdat->tun_stream,
                 G_PRIORITY_DEFAULT, NULL,
                 io_stream_close_async_handler,
                 cdat);
-    g_object_unref (cdat->tls_stream);
-    cdat->tls_stream = tls_base;
 
     return;
 }
@@ -815,22 +785,16 @@ output_stream_write_async_handler (GObject *source_object,
             GAsyncResult *res, gpointer user_data)
 {
     HevServerClientData *cdat = user_data;
-    GIOStream *tls_base = NULL;
 
     g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
 
     g_output_stream_write_finish (G_OUTPUT_STREAM (source_object),
                 res, NULL);
 
-    g_object_get (cdat->tls_stream,
-                "base-io-stream", &tls_base,
-                NULL);
-    g_io_stream_close_async (tls_base,
+    g_io_stream_close_async (cdat->tun_stream,
                 G_PRIORITY_DEFAULT, NULL,
                 io_stream_close_async_handler,
                 cdat);
-    g_object_unref (cdat->tls_stream);
-    cdat->tls_stream = tls_base;
 }
 
 static void
@@ -839,7 +803,7 @@ socket_client_connect_to_host_async_handler (GObject *source_object,
 {
     HevServerClientData *cdat = user_data;
     GSocketConnection *conn = NULL;
-    GIOStream *tls_base = NULL;
+    GIOStream *tun_base = NULL;
     GSocket *sock = NULL, *sock2 = NULL;
     GError *error = NULL;
 
@@ -855,29 +819,24 @@ socket_client_connect_to_host_async_handler (GObject *source_object,
     cdat->tgt_stream = G_IO_STREAM (conn);
 
     sock = g_socket_connection_get_socket (conn);
-    g_object_get (cdat->tls_stream,
-                "base-io-stream", &tls_base,
+    g_object_get (cdat->tun_stream,
+                "base-io-stream", &tun_base,
                 NULL);
-    sock2 = g_socket_connection_get_socket (G_SOCKET_CONNECTION (tls_base));
+    sock2 = g_socket_connection_get_socket (G_SOCKET_CONNECTION (tun_base));
     hev_socket_io_stream_splice_async (sock, cdat->tgt_stream,
-                sock2, cdat->tls_stream, G_PRIORITY_DEFAULT,
+                sock2, cdat->tun_stream, G_PRIORITY_DEFAULT,
                 socket_splice_preread_handler, NULL, cdat,
                 cdat->cancellable, io_stream_splice_async_handler,
                 cdat);
-    g_object_unref (tls_base);
+    g_object_unref (tun_base);
 
     return;
 
 connect_fail:
-    g_object_get (cdat->tls_stream,
-                "base-io-stream", &tls_base,
-                NULL);
-    g_io_stream_close_async (tls_base,
+    g_io_stream_close_async (cdat->tun_stream,
                 G_PRIORITY_DEFAULT, NULL,
                 io_stream_close_async_handler,
                 cdat);
-    g_object_unref (cdat->tls_stream);
-    cdat->tls_stream = tls_base;
 
     return;
 }
@@ -887,7 +846,6 @@ io_stream_splice_async_handler (GObject *source_object,
             GAsyncResult *res, gpointer user_data)
 {
     HevServerClientData *cdat = user_data;
-    GIOStream *tls_base = NULL;
     GError *error = NULL;
 
     g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
@@ -897,15 +855,10 @@ io_stream_splice_async_handler (GObject *source_object,
         g_clear_error (&error);
     }
 
-    g_object_get (cdat->tls_stream,
-                "base-io-stream", &tls_base,
-                NULL);
-    g_io_stream_close_async (tls_base,
+    g_io_stream_close_async (cdat->tun_stream,
                 G_PRIORITY_DEFAULT, NULL,
                 io_stream_close_async_handler,
                 cdat);
-    g_object_unref (cdat->tls_stream);
-    cdat->tls_stream = tls_base;
     g_io_stream_close_async (cdat->tgt_stream,
                 G_PRIORITY_DEFAULT, NULL,
                 io_stream_close_async_handler,
@@ -924,13 +877,13 @@ io_stream_close_async_handler (GObject *source_object,
     g_io_stream_close_finish (G_IO_STREAM (source_object),
                 res, NULL);
 
-    if (G_IO_STREAM (source_object) == cdat->tls_stream)
-      cdat->tls_stream = NULL;
+    if (G_IO_STREAM (source_object) == cdat->tun_stream)
+      cdat->tun_stream = NULL;
     else if (G_IO_STREAM (source_object) == cdat->tgt_stream)
       cdat->tgt_stream = NULL;
     g_object_unref (source_object);
 
-    if (!cdat->tls_stream && !cdat->tgt_stream) {
+    if (!cdat->tun_stream && !cdat->tgt_stream) {
         g_object_unref (cdat->cancellable);
         g_object_unref (cdat->self);
         g_slice_free (HevServerClientData, cdat);
