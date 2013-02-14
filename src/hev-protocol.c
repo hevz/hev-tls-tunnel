@@ -15,6 +15,9 @@
 gboolean
 hev_protocol_header_set (HevProtocolHeader *self, guint32 length)
 {
+    guint32 i = 0;
+    guint8 *data = (guint8 *) self;
+
     g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
 
     if (!self)
@@ -22,6 +25,9 @@ hev_protocol_header_set (HevProtocolHeader *self, guint32 length)
 
     self->activate_key = HEV_PROTO_ACTIVATE_KEY;
     self->length = length;
+
+    for (i=sizeof (HevProtocolHeader); i<length; i+=sizeof (guint32))
+      *(guint32 *)(data + i) = g_random_int ();
 
     return TRUE;
 }
