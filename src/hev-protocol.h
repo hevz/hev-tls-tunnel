@@ -32,6 +32,7 @@
             sizeof (HEV_PROTO_HTTP_RESPONSE_VALID)
 #define HEV_PROTO_HTTP_RESPONSE_INVALID "HTTP/1.1 200 OK\r\n" \
             "Content-Type: text/html\r\n" \
+            "Content-Length: 19\r\n" \
             "Connection: close\r\n" \
             "\r\n" \
             "<h1>It works!</h1>\n"
