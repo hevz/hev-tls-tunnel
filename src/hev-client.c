@@ -38,6 +38,7 @@ struct _HevClientPrivate
 
     GSocketService *service;
     GSocketClient *client;
+    gboolean use_tls;
 };
 
 struct _HevClientClientData
@@ -333,6 +334,8 @@ async_result_run_in_thread_handler (GSimpleAsyncResult *simple,
         goto client_fail;
     }
 
+    priv->use_tls = !g_str_equal ("None", priv->ca_file);
+
     return;
 
 client_fail:
@@ -481,6 +484,7 @@ socket_client_connect_to_host_async_handler (GObject *source_object,
             GAsyncResult *res, gpointer user_data)
 {
     HevClientClientData *cdat = user_data;
+    HevClientPrivate *priv = HEV_CLIENT_GET_PRIVATE (cdat->self);
     GSocketConnection *conn = NULL;
     GOutputStream *tun_output = NULL;
     guint32 length = 0;
@@ -496,17 +500,21 @@ socket_client_connect_to_host_async_handler (GObject *source_object,
         goto connect_fail;
     }
 
-    cdat->tun_stream = g_tls_client_connection_new (G_IO_STREAM (conn),
-                NULL, &error);
-    if (!cdat->tun_stream) {
-        g_critical ("Create tls client stream failed: %s", error->message);
-        g_clear_error (&error);
-        goto tun_stream_fail;
-    }
+    if (priv->use_tls) {
+        cdat->tun_stream = g_tls_client_connection_new (G_IO_STREAM (conn),
+                    NULL, &error);
+        if (!cdat->tun_stream) {
+            g_critical ("Create tls client stream failed: %s", error->message);
+            g_clear_error (&error);
+            goto tun_stream_fail;
+        }
 
-    g_signal_connect (cdat->tun_stream, "accept-certificate",
-                G_CALLBACK (tls_connection_accept_certificate_handler),
-                cdat);
+        g_signal_connect (cdat->tun_stream, "accept-certificate",
+                    G_CALLBACK (tls_connection_accept_certificate_handler),
+                    cdat);
+    } else {
+        cdat->tun_stream = g_object_ref (conn);
+    }
 
     length = g_random_int_range (HEV_PROTO_HEADER_MINN_SIZE,
                 HEV_PROTO_HEADER_MAXN_SIZE);
@@ -539,6 +547,7 @@ output_stream_write_async_handler (GObject *source_object,
             GAsyncResult *res, gpointer user_data)
 {
     HevClientClientData *cdat = user_data;
+    HevClientPrivate *priv = HEV_CLIENT_GET_PRIVATE (cdat->self);
     GSocket *sock = NULL, *sock2 = NULL;
     GIOStream *tun_base = NULL;
     gssize size = 0;
@@ -557,9 +566,13 @@ output_stream_write_async_handler (GObject *source_object,
     }
 
     sock = g_socket_connection_get_socket (G_SOCKET_CONNECTION (cdat->lcl_stream));
-    g_object_get (cdat->tun_stream,
-                "base-io-stream", &tun_base,
-                NULL);
+    if (priv->use_tls) {
+        g_object_get (cdat->tun_stream,
+                    "base-io-stream", &tun_base,
+                    NULL);
+    } else {
+        tun_base = g_object_ref (cdat->tun_stream);
+    }
     sock2 = g_socket_connection_get_socket (G_SOCKET_CONNECTION (tun_base));
     hev_socket_io_stream_splice_async (sock, cdat->lcl_stream,
                 sock2, cdat->tun_stream, G_PRIORITY_DEFAULT, NULL, NULL, NULL,

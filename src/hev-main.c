@@ -48,9 +48,9 @@ static const GOptionEntry server_entries[] =
     { "listen-port", 'n', 0, G_OPTION_ARG_INT, &listen_port,
         "Listen port", NULL },
     { "cert-file", 'c', 0, G_OPTION_ARG_STRING, &cert_file,
-        "Certificate file (PEM)", NULL },
+        "Certificate file path (PEM) or None", NULL },
     { "key-file", 'k', 0, G_OPTION_ARG_STRING, &key_file,
-        "Private key file (PEM)", NULL },
+        "Private key file path (PEM) or None", NULL },
     { NULL }
 };
 
@@ -65,7 +65,7 @@ static const GOptionEntry client_entries[] =
     { "local-port", 'x', 0, G_OPTION_ARG_INT, &local_port,
         "Local port", NULL },
     { "ca-file", 'r', 0, G_OPTION_ARG_STRING, &ca_file,
-        "Trusted CA file", NULL },
+        "Trusted CA file path or None", NULL },
     { NULL }
 };
 
