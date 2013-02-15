@@ -8,6 +8,8 @@
  ============================================================================
  */
 
+#include <string.h>
+
 #include "hev-client.h"
 #include "hev-protocol.h"
 #include "hev-utils.h"
@@ -47,7 +49,6 @@ struct _HevClientClientData
     GIOStream *lcl_stream;
 
     HevClient *self;
-    guint8 proto_header[HEV_PROTO_HEADER_MAXN_SIZE];
 };
 
 static void hev_client_async_initable_iface_init (GAsyncInitableIface *iface);
@@ -56,16 +57,14 @@ static void hev_client_async_initable_init_async (GAsyncInitable *initable,
             GAsyncReadyCallback callback, gpointer user_data);
 static gboolean hev_client_async_initable_init_finish (GAsyncInitable *initable,
             GAsyncResult *result, GError **error);
-static void socket_splice_preread_handler (GSocket *sock, GIOStream *stream,
-            gpointer data, gsize size, gpointer *buffer, gssize *len,
-            gpointer user_data);
-static void socket_splice_prewrite_handler (GSocket *sock, GIOStream *stream,
-            gpointer data, gsize size, gpointer *buffer, gssize *len,
-            gpointer user_data);
 static gboolean socket_service_incoming_handler (GSocketService *service,
             GSocketConnection *connection, GObject *source_object,
             gpointer user_data);
 static void socket_client_connect_to_host_async_handler (GObject *source_object,
+            GAsyncResult *res, gpointer user_data);
+static void buffered_input_stream_fill_async_handler (GObject *source_object,
+            GAsyncResult *res, gpointer user_data);
+static void input_stream_skip_async_handler (GObject *source_object,
             GAsyncResult *res, gpointer user_data);
 static void io_stream_splice_async_handler (GObject *source_object,
             GAsyncResult *res, gpointer user_data);
@@ -453,28 +452,6 @@ hev_client_stop (HevClient *self)
     g_socket_service_stop (priv->service);
 }
 
-static void
-socket_splice_preread_handler (GSocket *sock, GIOStream *stream,
-            gpointer data, gsize size, gpointer *buffer, gssize *len,
-            gpointer user_data)
-{
-    g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
-
-    *buffer = data;
-    *len = size;
-}
-
-static void
-socket_splice_prewrite_handler (GSocket *sock, GIOStream *stream,
-            gpointer data, gsize size, gpointer *buffer, gssize *len,
-            gpointer user_data)
-{
-    g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
-
-    *buffer = data;
-    *len = size;
-}
-
 static gboolean
 socket_service_incoming_handler (GSocketService *service,
             GSocketConnection *connection,
@@ -515,6 +492,9 @@ socket_client_connect_to_host_async_handler (GObject *source_object,
     HevClientPrivate *priv = HEV_CLIENT_GET_PRIVATE (cdat->self);
     GSocketConnection *conn = NULL;
     GOutputStream *tun_output = NULL;
+    guint8 req_buffer[HEV_PROTO_HTTP_REQUEST_LENGTH +
+        HEV_PROTO_HEADER_MAXN_SIZE] = { 0 };
+    HevProtocolHeader *proto_header = NULL;
     guint32 length = 0;
     GError *error = NULL;
 
@@ -532,7 +512,7 @@ socket_client_connect_to_host_async_handler (GObject *source_object,
         cdat->tun_stream = g_tls_client_connection_new (G_IO_STREAM (conn),
                     NULL, &error);
         if (!cdat->tun_stream) {
-            g_critical ("Create tls client stream failed: %s", error->message);
+            g_critical ("Create TLS client stream failed: %s", error->message);
             g_clear_error (&error);
             goto tun_stream_fail;
         }
@@ -544,13 +524,14 @@ socket_client_connect_to_host_async_handler (GObject *source_object,
         cdat->tun_stream = g_object_ref (conn);
     }
 
+    memcpy (req_buffer, HEV_PROTO_HTTP_REQUEST, HEV_PROTO_HTTP_REQUEST_LENGTH);
+    proto_header = (HevProtocolHeader *)(req_buffer + HEV_PROTO_HTTP_REQUEST_LENGTH);
     length = g_random_int_range (HEV_PROTO_HEADER_MINN_SIZE,
                 HEV_PROTO_HEADER_MAXN_SIZE);
-    hev_protocol_header_set ((HevProtocolHeader *)&cdat->proto_header,
-                length);
+    hev_protocol_header_set (proto_header, length);
     tun_output = g_io_stream_get_output_stream (cdat->tun_stream);
-    g_output_stream_write_async (tun_output,
-                &cdat->proto_header, length,
+    g_output_stream_write_async (tun_output, req_buffer,
+                HEV_PROTO_HTTP_REQUEST_LENGTH + length,
                 G_PRIORITY_DEFAULT, NULL,
                 output_stream_write_async_handler,
                 cdat);
@@ -575,9 +556,8 @@ output_stream_write_async_handler (GObject *source_object,
             GAsyncResult *res, gpointer user_data)
 {
     HevClientClientData *cdat = user_data;
-    HevClientPrivate *priv = HEV_CLIENT_GET_PRIVATE (cdat->self);
-    GSocket *sock = NULL, *sock2 = NULL;
-    GIOStream *tun_base = NULL;
+    GInputStream *tun_input = NULL;
+    GInputStream *tun_bufed_input = NULL;
     gssize size = 0;
     GError *error = NULL;
 
@@ -587,26 +567,22 @@ output_stream_write_async_handler (GObject *source_object,
                 res, &error);
     switch (size) {
     case -1:
-        g_critical ("TLS connection write failed: %s", error->message);
+        g_critical ("Tunnel connection write failed: %s", error->message);
         g_clear_error (&error);
     case 0:
         goto closed;
     }
 
-    sock = g_socket_connection_get_socket (G_SOCKET_CONNECTION (cdat->lcl_stream));
-    if (priv->use_tls) {
-        g_object_get (cdat->tun_stream,
-                    "base-io-stream", &tun_base,
-                    NULL);
-    } else {
-        tun_base = g_object_ref (cdat->tun_stream);
-    }
-    sock2 = g_socket_connection_get_socket (G_SOCKET_CONNECTION (tun_base));
-    hev_socket_io_stream_splice_async (sock, cdat->lcl_stream,
-                sock2, cdat->tun_stream, G_PRIORITY_DEFAULT,
-                socket_splice_preread_handler, socket_splice_prewrite_handler,
-                cdat, NULL, io_stream_splice_async_handler, cdat);
-    g_object_unref (tun_base);
+    tun_input = g_io_stream_get_input_stream (cdat->tun_stream);
+    tun_bufed_input = g_buffered_input_stream_new_sized (tun_input,
+                HEV_PROTO_HTTP_RESPONSE_VALID_LENGTH + HEV_PROTO_HEADER_REAL_SIZE);
+    g_filter_input_stream_set_close_base_stream (
+                G_FILTER_INPUT_STREAM (tun_bufed_input),
+                FALSE);
+    g_buffered_input_stream_fill_async (G_BUFFERED_INPUT_STREAM (tun_bufed_input),
+                HEV_PROTO_HTTP_RESPONSE_VALID_LENGTH + HEV_PROTO_HEADER_REAL_SIZE,
+                G_PRIORITY_DEFAULT, NULL, buffered_input_stream_fill_async_handler,
+                cdat);
 
     return;
 
@@ -624,6 +600,115 @@ closed:
 }
 
 static void
+buffered_input_stream_fill_async_handler (GObject *source_object,
+            GAsyncResult *res, gpointer user_data)
+{
+    HevClientClientData *cdat = user_data;
+    GInputStream *tun_input = NULL;
+    GBufferedInputStream *tun_bufed_input = NULL;
+    gssize size = 0;
+    gconstpointer res_buffer;
+    const HevProtocolHeader *proto_header = NULL;
+    gsize len = 0;
+    GError *error = NULL;
+
+    g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
+
+    tun_bufed_input = G_BUFFERED_INPUT_STREAM (source_object);
+    size = g_buffered_input_stream_fill_finish (tun_bufed_input,
+                res, &error);
+    switch (size) {
+    case -1:
+        g_critical ("Buffered input stream fill failed: %s",
+                    error->message);
+        g_clear_error (&error);
+    case 0:
+        goto closed;
+    }
+
+    res_buffer = g_buffered_input_stream_peek_buffer (tun_bufed_input, &len);
+    proto_header = (HevProtocolHeader *)
+        (res_buffer + HEV_PROTO_HTTP_RESPONSE_VALID_LENGTH);
+    if (!hev_protocol_header_is_valid (proto_header)) {
+        g_warning ("Server's response message is invalid!");
+        goto closed;
+    }
+    tun_input = g_filter_input_stream_get_base_stream (
+                G_FILTER_INPUT_STREAM (tun_bufed_input));
+    g_input_stream_skip_async (tun_input,
+                proto_header->length - HEV_PROTO_HEADER_REAL_SIZE,
+                G_PRIORITY_DEFAULT, NULL, 
+                input_stream_skip_async_handler,
+                cdat);
+
+    g_object_unref (tun_bufed_input);
+
+    return;
+
+closed:
+    g_object_unref (tun_bufed_input);
+    g_io_stream_close_async (cdat->tun_stream,
+                G_PRIORITY_DEFAULT, NULL,
+                io_stream_close_async_handler,
+                cdat);
+    g_io_stream_close_async (cdat->lcl_stream,
+                G_PRIORITY_DEFAULT, NULL,
+                io_stream_close_async_handler,
+                cdat);
+
+    return;
+}
+
+static void
+input_stream_skip_async_handler (GObject *source_object,
+            GAsyncResult *res, gpointer user_data)
+{
+    HevClientClientData *cdat = user_data;
+    HevClientPrivate *priv = HEV_CLIENT_GET_PRIVATE (cdat->self);
+    GSocket *sock = NULL, *sock2 = NULL;
+    GIOStream *tun_base = NULL;
+    gssize size = 0;
+    GError *error = NULL;
+
+    g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
+
+    size = g_input_stream_skip_finish (G_INPUT_STREAM (source_object),
+                res, &error);
+    switch (size) {
+    case -1:
+        g_critical ("Buffered input stream fill failed: %s",
+                    error->message);
+        g_clear_error (&error);
+    case 0:
+        goto closed;
+    }
+
+    sock = g_socket_connection_get_socket (G_SOCKET_CONNECTION (cdat->lcl_stream));
+    if (priv->use_tls) {
+        g_object_get (cdat->tun_stream,
+                    "base-io-stream", &tun_base,
+                    NULL);
+    } else {
+        tun_base = g_object_ref (cdat->tun_stream);
+    }
+    sock2 = g_socket_connection_get_socket (G_SOCKET_CONNECTION (tun_base));
+    hev_socket_io_stream_splice_async (sock, cdat->lcl_stream,
+                sock2, cdat->tun_stream, G_PRIORITY_DEFAULT, NULL, NULL, NULL,
+                NULL, io_stream_splice_async_handler, cdat);
+    g_object_unref (tun_base);
+
+    return;
+
+closed:
+    g_io_stream_close_async (cdat->tun_stream,
+                G_PRIORITY_DEFAULT, NULL,
+                io_stream_close_async_handler,
+                cdat);
+
+    return;
+}
+
+static void
 io_stream_splice_async_handler (GObject *source_object,
             GAsyncResult *res, gpointer user_data)
 {
@@ -633,7 +718,7 @@ io_stream_splice_async_handler (GObject *source_object,
     g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
 
     if (!hev_socket_io_stream_splice_finish (res, &error)) {
-        g_debug ("Splice tls and server stream failed: %s", error->message);
+        g_debug ("Splice tunnel and server stream failed: %s", error->message);
         g_clear_error (&error);
     }
 

@@ -18,6 +18,26 @@
 #define HEV_PROTO_HEADER_MINN_SIZE  280
 #define HEV_PROTO_HEADER_MAXN_SIZE  1024
 
+#define HEV_PROTO_HTTP_REQUEST  "POST / HTTP/1.1\r\n" \
+            "Content-Type: application/octet-stream\r\n" \
+            "Connection: keep-alive\r\n" \
+            "\r\n"
+#define HEV_PROTO_HTTP_REQUEST_LENGTH \
+            sizeof (HEV_PROTO_HTTP_REQUEST)
+#define HEV_PROTO_HTTP_RESPONSE_VALID "HTTP/1.1 200 OK\r\n" \
+            "Content-Type: application/octet-stream\r\n" \
+            "Connection: keep-alive\r\n" \
+            "\r\n"
+#define HEV_PROTO_HTTP_RESPONSE_VALID_LENGTH \
+            sizeof (HEV_PROTO_HTTP_RESPONSE_VALID)
+#define HEV_PROTO_HTTP_RESPONSE_INVALID "HTTP/1.1 200 OK\r\n" \
+            "Content-Type: text/html\r\n" \
+            "Connection: close\r\n" \
+            "\r\n" \
+            "<h1>It works!</h1>\n"
+#define HEV_PROTO_HTTP_RESPONSE_INVALID_LENGTH \
+            sizeof (HEV_PROTO_HTTP_RESPONSE_INVALID)
+
 typedef struct _HevProtocolHeader HevProtocolHeader;
 
 struct _HevProtocolHeader

@@ -8,8 +8,6 @@
  ============================================================================
  */
 
-#include <string.h>
-
 #include "hev-protocol.h"
 
 gboolean
@@ -49,17 +47,9 @@ hev_protocol_header_is_valid (const HevProtocolHeader *self)
 const gchar *
 hev_protocol_get_invalid_message (gsize *count)
 {
-    gchar *message =
-        "HTTP/1.1 200 OK\r\n"
-        "Content-Type: text/html\r\n"
-        "Content-Length: 19\r\n"
-        "Connection: close\r\n"
-        "\r\n"
-        "<h1>It works!</h1>\n";
-
     if (count)
-      *count = strlen (message);
+      *count = HEV_PROTO_HTTP_RESPONSE_INVALID_LENGTH;
 
-    return message;
+    return HEV_PROTO_HTTP_RESPONSE_INVALID;
 }
 
