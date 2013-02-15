@@ -159,6 +159,7 @@ hev_socket_io_stream_splice_sock1_source_handler (GSocket *socket,
         gpointer buffer = data->buffer1;
         gssize len = HEV_SOCKET_IO_STREAM_SPLICE_BUFFER_SIZE;
 
+        data->buffer1_curr = 0;
         data->s1_status = HEV_SOCKET_IO_STREAM_SPLICE_STATUS_READING;
         in = g_io_stream_get_input_stream (data->stream1);
         if (data->preread_callback)
@@ -189,6 +190,7 @@ hev_socket_io_stream_splice_sock2_source_handler (GSocket *socket,
         gpointer buffer = data->buffer2;
         gssize len = HEV_SOCKET_IO_STREAM_SPLICE_BUFFER_SIZE;
 
+        data->buffer2_curr = 0;
         data->s2_status = HEV_SOCKET_IO_STREAM_SPLICE_STATUS_READING;
         in = g_io_stream_get_input_stream (data->stream2);
         if (data->preread_callback)
