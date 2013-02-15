@@ -66,7 +66,12 @@ static void hev_server_async_initable_init_async (GAsyncInitable *initable,
             GAsyncReadyCallback callback, gpointer user_data);
 static gboolean hev_server_async_initable_init_finish (GAsyncInitable *initable,
             GAsyncResult *result, GError **error);
-static void socket_splice_preread_handler (gpointer data, gpointer user_data);
+static void socket_splice_preread_handler (GSocket *sock, GIOStream *stream,
+            gpointer data, gsize size, gpointer *buffer, gssize *len,
+            gpointer user_data);
+static void socket_splice_prewrite_handler (GSocket *sock, GIOStream *stream,
+            gpointer data, gsize size, gpointer *buffer, gssize *len,
+            gpointer user_data);
 static void client_list_free_handler (gpointer data);
 static void client_list_foreach_handler (gpointer data, gpointer user_data);
 static gboolean timeout_handler (gpointer user_data);
@@ -510,13 +515,29 @@ hev_server_stop (HevServer *self)
 }
 
 static void
-socket_splice_preread_handler (gpointer data, gpointer user_data)
+socket_splice_preread_handler (GSocket *sock, GIOStream *stream,
+            gpointer data, gsize size, gpointer *buffer, gssize *len,
+            gpointer user_data)
 {
     HevServerClientData *cdat = user_data;
 
     g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
 
+    *buffer = data;
+    *len = size;
+
     cdat->timeout_count = 0;
+}
+
+static void
+socket_splice_prewrite_handler (GSocket *sock, GIOStream *stream,
+            gpointer data, gsize size, gpointer *buffer, gssize *len,
+            gpointer user_data)
+{
+    g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
+
+    *buffer = data;
+    *len = size;
 }
 
 static void
@@ -855,8 +876,8 @@ socket_client_connect_to_host_async_handler (GObject *source_object,
     sock2 = g_socket_connection_get_socket (G_SOCKET_CONNECTION (tun_base));
     hev_socket_io_stream_splice_async (sock, cdat->tgt_stream,
                 sock2, cdat->tun_stream, G_PRIORITY_DEFAULT,
-                socket_splice_preread_handler, NULL, cdat,
-                cdat->cancellable, io_stream_splice_async_handler,
+                socket_splice_preread_handler, socket_splice_prewrite_handler,
+                cdat, cdat->cancellable, io_stream_splice_async_handler,
                 cdat);
     g_object_unref (tun_base);
 

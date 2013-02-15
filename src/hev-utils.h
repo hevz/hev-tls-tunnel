@@ -15,9 +15,17 @@
 
 G_BEGIN_DECLS
 
+typedef void (*HevSocketIOStreamSplicePrereadFunc) (GSocket *sock,
+            GIOStream *stream, gpointer data, gsize size,
+            gpointer *buffer, gssize *len, gpointer user_data);
+typedef void (*HevSocketIOStreamSplicePrewriteFunc) (GSocket *sock,
+            GIOStream *stream, gpointer data, gsize size,
+            gpointer *buffer, gssize *len, gpointer user_data);
+
 void hev_socket_io_stream_splice_async (GSocket *sock1, GIOStream *stream1,
             GSocket *sock2, GIOStream *stream2, gint io_priority,
-            GFunc preread_callback, GFunc prewrite_callback,
+            HevSocketIOStreamSplicePrereadFunc preread_callback,
+            HevSocketIOStreamSplicePrewriteFunc prewrite_callback,
             gpointer callback_data, GCancellable *cancellable,
             GAsyncReadyCallback callback, gpointer user_data);
 
