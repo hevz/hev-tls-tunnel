@@ -49,6 +49,8 @@ struct _HevClientClientData
     GIOStream *lcl_stream;
 
     HevClient *self;
+    guint8 req_buffer[HEV_PROTO_HTTP_REQUEST_LENGTH +
+        HEV_PROTO_HEADER_MAXN_SIZE];
 };
 
 static void hev_client_async_initable_iface_init (GAsyncInitableIface *iface);
@@ -492,8 +494,6 @@ socket_client_connect_to_host_async_handler (GObject *source_object,
     HevClientPrivate *priv = HEV_CLIENT_GET_PRIVATE (cdat->self);
     GSocketConnection *conn = NULL;
     GOutputStream *tun_output = NULL;
-    guint8 req_buffer[HEV_PROTO_HTTP_REQUEST_LENGTH +
-        HEV_PROTO_HEADER_MAXN_SIZE] = { 0 };
     HevProtocolHeader *proto_header = NULL;
     guint32 length = 0;
     GError *error = NULL;
@@ -524,13 +524,15 @@ socket_client_connect_to_host_async_handler (GObject *source_object,
         cdat->tun_stream = g_object_ref (conn);
     }
 
-    memcpy (req_buffer, HEV_PROTO_HTTP_REQUEST, HEV_PROTO_HTTP_REQUEST_LENGTH);
-    proto_header = (HevProtocolHeader *)(req_buffer + HEV_PROTO_HTTP_REQUEST_LENGTH);
+    memcpy (cdat->req_buffer, HEV_PROTO_HTTP_REQUEST,
+                HEV_PROTO_HTTP_REQUEST_LENGTH);
+    proto_header = (HevProtocolHeader *)
+        (cdat->req_buffer + HEV_PROTO_HTTP_REQUEST_LENGTH);
     length = g_random_int_range (HEV_PROTO_HEADER_MINN_SIZE,
                 HEV_PROTO_HEADER_MAXN_SIZE);
     hev_protocol_header_set (proto_header, length);
     tun_output = g_io_stream_get_output_stream (cdat->tun_stream);
-    g_output_stream_write_async (tun_output, req_buffer,
+    g_output_stream_write_async (tun_output, cdat->req_buffer,
                 HEV_PROTO_HTTP_REQUEST_LENGTH + length,
                 G_PRIORITY_DEFAULT, NULL,
                 output_stream_write_async_handler,

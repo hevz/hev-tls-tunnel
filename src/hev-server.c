@@ -60,6 +60,8 @@ struct _HevServerClientData
     GCancellable *cancellable;
 
     HevServer *self;
+    guint8 res_buffer[HEV_PROTO_HTTP_RESPONSE_VALID_LENGTH +
+        HEV_PROTO_HEADER_MAXN_SIZE];
 };
 
 static void hev_server_async_initable_iface_init (GAsyncInitableIface *iface);
@@ -807,8 +809,6 @@ input_stream_skip_async_handler (GObject *source_object,
     HevServerClientData *cdat = user_data;
     gssize size = 0;
     GOutputStream *tun_output = NULL;
-    guint8 res_buffer[HEV_PROTO_HTTP_RESPONSE_VALID_LENGTH +
-        HEV_PROTO_HEADER_MAXN_SIZE] = { 0 };
     HevProtocolHeader *proto_header = NULL;
     guint32 length = 0;
     GError *error = NULL;
@@ -826,15 +826,15 @@ input_stream_skip_async_handler (GObject *source_object,
         goto closed;
     }
 
-    memcpy (res_buffer, HEV_PROTO_HTTP_RESPONSE_VALID,
+    memcpy (cdat->res_buffer, HEV_PROTO_HTTP_RESPONSE_VALID,
                 HEV_PROTO_HTTP_RESPONSE_VALID_LENGTH);
-    proto_header = (HevProtocolHeader *)(res_buffer +
+    proto_header = (HevProtocolHeader *)(cdat->res_buffer +
                 HEV_PROTO_HTTP_RESPONSE_VALID_LENGTH);
     length = g_random_int_range (HEV_PROTO_HEADER_MINN_SIZE,
                 HEV_PROTO_HEADER_MAXN_SIZE);
     hev_protocol_header_set (proto_header, length);
     tun_output = g_io_stream_get_output_stream (cdat->tun_stream);
-    g_output_stream_write_async (tun_output, res_buffer,
+    g_output_stream_write_async (tun_output, cdat->res_buffer,
                 HEV_PROTO_HTTP_RESPONSE_VALID_LENGTH + length,
                 G_PRIORITY_DEFAULT, NULL,
                 valid_output_stream_write_async_handler,
