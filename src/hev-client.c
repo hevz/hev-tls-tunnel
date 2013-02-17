@@ -454,6 +454,25 @@ hev_client_stop (HevClient *self)
     g_socket_service_stop (priv->service);
 }
 
+static void
+socket_splice_prewrite_handler (GSocket *sock, GIOStream *stream,
+            gpointer data, gsize size, gpointer *buffer, gssize *len,
+            gpointer user_data)
+{
+    guint64 *d64 = NULL;
+    guint8 *d8 = NULL;
+    gsize i = 0;
+
+    g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
+
+    d64 = data;
+    for (i=0; i<(size/8); i++)
+      d64[i] = ~d64[i];
+    d8 = data;
+    for (i=size-(size%8); i<size; i++)
+      d8[i] = ~d8[i];
+}
+
 static gboolean
 socket_service_incoming_handler (GSocketService *service,
             GSocketConnection *connection,
@@ -695,7 +714,8 @@ input_stream_skip_async_handler (GObject *source_object,
     }
     sock2 = g_socket_connection_get_socket (G_SOCKET_CONNECTION (tun_base));
     hev_socket_io_stream_splice_async (sock, cdat->lcl_stream,
-                sock2, cdat->tun_stream, G_PRIORITY_DEFAULT, NULL, NULL, NULL,
+                sock2, cdat->tun_stream, G_PRIORITY_DEFAULT,
+                NULL, socket_splice_prewrite_handler, NULL,
                 NULL, io_stream_splice_async_handler, cdat);
     g_object_unref (tun_base);
 
