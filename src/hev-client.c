@@ -461,15 +461,18 @@ socket_splice_prewrite_handler (GSocket *sock, GIOStream *stream,
 {
     guint64 *d64 = NULL;
     guint8 *d8 = NULL;
-    gsize i = 0;
+    gsize i = 0, c = 0, p = 0;
 
     g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
 
+    c = size >> 3;
+    p = c << 3;
+
     d64 = data;
-    for (i=0; i<(size/8); i++)
+    for (i=0; i<c; i++)
       d64[i] = ~d64[i];
     d8 = data;
-    for (i=size-(size%8); i<size; i++)
+    for (i=p; i<size; i++)
       d8[i] = ~d8[i];
 }
 
