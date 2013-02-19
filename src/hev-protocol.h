@@ -15,8 +15,8 @@
 
 #define HEV_PROTO_ACTIVATE_KEY  0xA0F0ABCD
 #define HEV_PROTO_HEADER_REAL_SIZE  (sizeof (HevProtocolHeader))
-#define HEV_PROTO_HEADER_MINN_SIZE  280
-#define HEV_PROTO_HEADER_MAXN_SIZE  1024
+#define HEV_PROTO_HEADER_MINN_SIZE  (HEV_PROTO_HEADER_REAL_SIZE+8)
+#define HEV_PROTO_HEADER_MAXN_SIZE  (HEV_PROTO_HEADER_REAL_SIZE+64)
 
 #define HEV_PROTO_HTTP_REQUEST  "POST / HTTP/1.1\r\n" \
             "Content-Type: application/octet-stream\r\n" \
