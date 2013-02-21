@@ -70,7 +70,10 @@ static void hev_server_async_initable_init_async (GAsyncInitable *initable,
             GAsyncReadyCallback callback, gpointer user_data);
 static gboolean hev_server_async_initable_init_finish (GAsyncInitable *initable,
             GAsyncResult *result, GError **error);
-static void socket_splice_preread_handler (GSocket *sock, GIOStream *stream,
+static void pollable_splice_preread_handler (GIOStream *stream,
+            gpointer data, gsize size, gpointer *buffer, gssize *len,
+            gpointer user_data);
+static void pollable_splice_prewrite_handler (GIOStream *stream,
             gpointer data, gsize size, gpointer *buffer, gssize *len,
             gpointer user_data);
 static void client_list_free_handler (gpointer data);
@@ -518,7 +521,7 @@ hev_server_stop (HevServer *self)
 }
 
 static void
-socket_splice_preread_handler (GSocket *sock, GIOStream *stream,
+pollable_splice_preread_handler (GIOStream *stream,
             gpointer data, gsize size, gpointer *buffer, gssize *len,
             gpointer user_data)
 {
@@ -533,7 +536,7 @@ socket_splice_preread_handler (GSocket *sock, GIOStream *stream,
 }
 
 static void
-socket_splice_prewrite_handler (GSocket *sock, GIOStream *stream,
+pollable_splice_prewrite_handler (GIOStream *stream,
             gpointer data, gsize size, gpointer *buffer, gssize *len,
             gpointer user_data)
 {
@@ -915,10 +918,7 @@ socket_client_connect_to_host_async_handler (GObject *source_object,
             GAsyncResult *res, gpointer user_data)
 {
     HevServerClientData *cdat = user_data;
-    HevServerPrivate *priv = HEV_SERVER_GET_PRIVATE (cdat->self);
     GSocketConnection *conn = NULL;
-    GIOStream *tun_base = NULL;
-    GSocket *sock = NULL, *sock2 = NULL;
     GError *error = NULL;
 
     g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
@@ -932,21 +932,11 @@ socket_client_connect_to_host_async_handler (GObject *source_object,
     }
     cdat->tgt_stream = G_IO_STREAM (conn);
 
-    sock = g_socket_connection_get_socket (conn);
-    if (priv->use_tls) {
-        g_object_get (cdat->tun_stream,
-                    "base-io-stream", &tun_base,
-                    NULL);
-    } else {
-        tun_base = g_object_ref (cdat->tun_stream);
-    }
-    sock2 = g_socket_connection_get_socket (G_SOCKET_CONNECTION (tun_base));
-    hev_socket_io_stream_splice_async (sock, cdat->tgt_stream,
-                sock2, cdat->tun_stream, G_PRIORITY_DEFAULT,
-                socket_splice_preread_handler, socket_splice_prewrite_handler,
+    hev_pollable_io_stream_splice_async (cdat->tgt_stream,
+                cdat->tun_stream, G_PRIORITY_DEFAULT,
+                pollable_splice_preread_handler, pollable_splice_prewrite_handler,
                 cdat, cdat->cancellable, io_stream_splice_async_handler,
                 cdat);
-    g_object_unref (tun_base);
 
     return;
 
@@ -968,7 +958,7 @@ io_stream_splice_async_handler (GObject *source_object,
 
     g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
 
-    if (!hev_socket_io_stream_splice_finish (res, &error)) {
+    if (!hev_pollable_io_stream_splice_finish (res, &error)) {
         g_debug ("Splice tunnel and target stream failed: %s", error->message);
         g_clear_error (&error);
     }
