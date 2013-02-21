@@ -23,7 +23,7 @@ typedef void (*HevPollableIOStreamSplicePrewriteFunc) (GIOStream *stream,
             gpointer user_data);
 
 void hev_pollable_io_stream_splice_async (GIOStream *stream1,
-            GIOStream *stream2, gint io_priority,
+            GIOStream *stream2, gint io_priority, GMainContext *context,
             HevPollableIOStreamSplicePrereadFunc preread_callback,
             HevPollableIOStreamSplicePrewriteFunc prewrite_callback,
             gpointer callback_data, GCancellable *cancellable,

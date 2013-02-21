@@ -19,6 +19,7 @@ struct _HevPollableIOStreamSpliceData
     GIOStream *stream1;
     GIOStream *stream2;
     GCancellable *cancellable;
+    GMainContext *context;
     gint io_priority;
     HevPollableIOStreamSplicePrereadFunc preread_callback;
     HevPollableIOStreamSplicePrewriteFunc prewrite_callback;
@@ -50,7 +51,7 @@ static gboolean hev_pollable_io_stream_splice_stream1_output_source_handler (GOb
 
 void
 hev_pollable_io_stream_splice_async (GIOStream *stream1,
-            GIOStream *stream2, gint io_priority,
+            GIOStream *stream2, gint io_priority, GMainContext *context,
             HevPollableIOStreamSplicePrereadFunc preread_callback,
             HevPollableIOStreamSplicePrewriteFunc prewrite_callback,
             gpointer callback_data, GCancellable *cancellable,
@@ -68,6 +69,8 @@ hev_pollable_io_stream_splice_async (GIOStream *stream1,
     if (cancellable)
       data->cancellable = g_object_ref (cancellable);
     data->io_priority = io_priority;
+    if (context)
+      data->context = g_main_context_ref (context);
     data->preread_callback = preread_callback;
     data->prewrite_callback = prewrite_callback;
     data->callback_data = callback_data;
@@ -86,7 +89,7 @@ hev_pollable_io_stream_splice_async (GIOStream *stream1,
                 (GSourceFunc) hev_pollable_io_stream_splice_stream1_input_source_handler,
                 g_object_ref (simple), (GDestroyNotify) g_object_unref);
     g_source_set_priority (data->s1i_src, io_priority);
-    g_source_attach (data->s1i_src, NULL);
+    g_source_attach (data->s1i_src, data->context);
     g_source_unref (data->s1i_src);
 
     /* stream2 */
@@ -97,7 +100,7 @@ hev_pollable_io_stream_splice_async (GIOStream *stream1,
                 (GSourceFunc) hev_pollable_io_stream_splice_stream2_input_source_handler,
                 g_object_ref (simple), (GDestroyNotify) g_object_unref);
     g_source_set_priority (data->s2i_src, io_priority);
-    g_source_attach (data->s2i_src, NULL);
+    g_source_attach (data->s2i_src, data->context);
     g_source_unref (data->s2i_src);
 
     g_object_unref (simple);
@@ -125,6 +128,8 @@ hev_pollable_io_stream_splice_data_free (HevPollableIOStreamSpliceData *data)
     g_object_unref (data->stream2);
     if (data->cancellable)
       g_object_unref (data->cancellable);
+    if (data->context)
+      g_main_context_unref (data->context);
     g_slice_free (HevPollableIOStreamSpliceData, data);
 }
 
@@ -162,7 +167,7 @@ hev_pollable_io_stream_splice_stream1_input_source_handler (GObject *istream,
                         (GSourceFunc) hev_pollable_io_stream_splice_stream2_output_source_handler,
                         g_object_ref (simple), (GDestroyNotify) g_object_unref);
             g_source_set_priority (data->s2o_src, data->io_priority);
-            g_source_attach (data->s2o_src, NULL);
+            g_source_attach (data->s2o_src, data->context);
             g_source_unref (data->s2o_src);
         }
 
@@ -236,7 +241,7 @@ hev_pollable_io_stream_splice_stream2_output_source_handler (GObject *ostream,
                             (GSourceFunc) hev_pollable_io_stream_splice_stream1_input_source_handler,
                             g_object_ref (simple), (GDestroyNotify) g_object_unref);
                 g_source_set_priority (data->s1i_src, data->io_priority);
-                g_source_attach (data->s1i_src, NULL);
+                g_source_attach (data->s1i_src, data->context);
                 g_source_unref (data->s1i_src);
             }
         }
@@ -304,7 +309,7 @@ hev_pollable_io_stream_splice_stream2_input_source_handler (GObject *istream,
                         (GSourceFunc) hev_pollable_io_stream_splice_stream1_output_source_handler,
                         g_object_ref (simple), (GDestroyNotify) g_object_unref);
             g_source_set_priority (data->s1o_src, data->io_priority);
-            g_source_attach (data->s1o_src, NULL);
+            g_source_attach (data->s1o_src, data->context);
             g_source_unref (data->s1o_src);
         }
 
@@ -378,7 +383,7 @@ hev_pollable_io_stream_splice_stream1_output_source_handler (GObject *ostream,
                             (GSourceFunc) hev_pollable_io_stream_splice_stream2_input_source_handler,
                             g_object_ref (simple), (GDestroyNotify) g_object_unref);
                 g_source_set_priority (data->s2i_src, data->io_priority);
-                g_source_attach (data->s2i_src, NULL);
+                g_source_attach (data->s2i_src, data->context);
                 g_source_unref (data->s2i_src);
             }
         }

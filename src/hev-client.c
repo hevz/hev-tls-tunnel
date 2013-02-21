@@ -708,7 +708,7 @@ input_stream_skip_async_handler (GObject *source_object,
     }
 
     hev_pollable_io_stream_splice_async (cdat->lcl_stream,
-                cdat->tun_stream, G_PRIORITY_DEFAULT,
+                cdat->tun_stream, G_PRIORITY_DEFAULT, NULL,
                 NULL, pollable_splice_prewrite_handler, NULL,
                 NULL, io_stream_splice_async_handler, cdat);
 

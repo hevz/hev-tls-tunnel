@@ -933,7 +933,7 @@ socket_client_connect_to_host_async_handler (GObject *source_object,
     cdat->tgt_stream = G_IO_STREAM (conn);
 
     hev_pollable_io_stream_splice_async (cdat->tgt_stream,
-                cdat->tun_stream, G_PRIORITY_DEFAULT,
+                cdat->tun_stream, G_PRIORITY_DEFAULT, NULL,
                 pollable_splice_preread_handler, pollable_splice_prewrite_handler,
                 cdat, cdat->cancellable, io_stream_splice_async_handler,
                 cdat);
