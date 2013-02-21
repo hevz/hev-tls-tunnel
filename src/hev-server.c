@@ -32,7 +32,7 @@ enum
 };
 
 typedef struct _HevServerPrivate HevServerPrivate;
-typedef struct _HevServerClientData HevServerClientData;
+typedef struct _HevServerSession HevServerSession;
 
 struct _HevServerPrivate
 {
@@ -45,13 +45,13 @@ struct _HevServerPrivate
 
     GSocketService *service;
     GSocketClient *client;
-    GSList *client_list;
+    GSList *session_list;
     gboolean use_tls;
 
     guint timeout_id;
 };
 
-struct _HevServerClientData
+struct _HevServerSession
 {
     GIOStream *tun_stream;
     GIOStream *tgt_stream;
@@ -76,8 +76,8 @@ static void pollable_splice_preread_handler (GIOStream *stream,
 static void pollable_splice_prewrite_handler (GIOStream *stream,
             gpointer data, gsize size, gpointer *buffer, gssize *len,
             gpointer user_data);
-static void client_list_free_handler (gpointer data);
-static void client_list_foreach_handler (gpointer data, gpointer user_data);
+static void session_list_free_handler (gpointer data);
+static void session_list_foreach_handler (gpointer data, gpointer user_data);
 static gboolean timeout_handler (gpointer user_data);
 static gboolean socket_service_incoming_handler (GSocketService *service,
             GSocketConnection *connection, GObject *source_object,
@@ -136,10 +136,10 @@ hev_server_dispose (GObject *obj)
         priv->client = NULL;
     }
 
-    if (priv->client_list) {
-        g_slist_free_full (priv->client_list,
-                    client_list_free_handler);
-        priv->client_list = NULL;
+    if (priv->session_list) {
+        g_slist_free_full (priv->session_list,
+                    session_list_free_handler);
+        priv->session_list = NULL;
     }
 
     G_OBJECT_CLASS (hev_server_parent_class)->dispose (obj);
@@ -525,14 +525,14 @@ pollable_splice_preread_handler (GIOStream *stream,
             gpointer data, gsize size, gpointer *buffer, gssize *len,
             gpointer user_data)
 {
-    HevServerClientData *cdat = user_data;
+    HevServerSession *session = user_data;
 
     g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
 
     *buffer = data;
     *len = size;
 
-    cdat->timeout_count = 0;
+    session->timeout_count = 0;
 }
 
 static void
@@ -558,49 +558,49 @@ pollable_splice_prewrite_handler (GIOStream *stream,
 }
 
 static void
-client_list_free_handler (gpointer data)
+session_list_free_handler (gpointer data)
 {
-    HevServerClientData *cdat = data;
+    HevServerSession *session = data;
 
     g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
 
-    g_io_stream_close_async (cdat->tun_stream,
+    g_io_stream_close_async (session->tun_stream,
                 G_PRIORITY_DEFAULT, NULL,
                 io_stream_close_async_handler,
-                cdat);
-    g_io_stream_close_async (cdat->tgt_stream,
+                session);
+    g_io_stream_close_async (session->tgt_stream,
                 G_PRIORITY_DEFAULT, NULL,
                 io_stream_close_async_handler,
-                cdat);
+                session);
 }
 
 static void
-client_list_foreach_handler (gpointer data, gpointer user_data)
+session_list_foreach_handler (gpointer data, gpointer user_data)
 {
-    HevServerClientData *cdat = data;
+    HevServerSession *session = data;
 
     g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
 
-    if (HEV_SERVER_TIMEOUT_MAX_COUNT < cdat->timeout_count) {
-        if (g_cancellable_is_cancelled (cdat->cancellable)) {
-            if (cdat->tun_stream) {
-                g_io_stream_close_async (cdat->tun_stream,
+    if (HEV_SERVER_TIMEOUT_MAX_COUNT < session->timeout_count) {
+        if (g_cancellable_is_cancelled (session->cancellable)) {
+            if (session->tun_stream) {
+                g_io_stream_close_async (session->tun_stream,
                             G_PRIORITY_DEFAULT, NULL,
                             io_stream_close_async_handler,
-                            cdat);
+                            session);
             }
-            if (cdat->tgt_stream) {
-                g_io_stream_close_async (cdat->tgt_stream,
+            if (session->tgt_stream) {
+                g_io_stream_close_async (session->tgt_stream,
                             G_PRIORITY_DEFAULT, NULL,
                             io_stream_close_async_handler,
-                            cdat);
+                            session);
             }
         } else {
-            g_cancellable_cancel (cdat->cancellable);
+            g_cancellable_cancel (session->cancellable);
         }
     }
 
-    cdat->timeout_count ++;
+    session->timeout_count ++;
 
     return;
 }
@@ -613,8 +613,8 @@ timeout_handler (gpointer user_data)
 
     g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
 
-    g_slist_foreach (priv->client_list,
-                client_list_foreach_handler, self);
+    g_slist_foreach (priv->session_list,
+                session_list_foreach_handler, self);
 
     return TRUE;
 }
@@ -629,7 +629,7 @@ socket_service_incoming_handler (GSocketService *service,
     HevServerPrivate *priv = HEV_SERVER_GET_PRIVATE (self);
     GTlsCertificate *cert = NULL;
     GIOStream *tun_stream = NULL;
-    HevServerClientData *cdat = NULL;
+    HevServerSession *session = NULL;
     GError *error = NULL;
 
     g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
@@ -654,30 +654,30 @@ socket_service_incoming_handler (GSocketService *service,
         tun_stream = g_object_ref (connection);
     }
 
-    cdat = g_slice_new0 (HevServerClientData);
-    if (!cdat) {
+    session = g_slice_new0 (HevServerSession);
+    if (!session) {
         g_critical ("Alloc client data failed!");
-        goto cdat_fail;
+        goto session_fail;
     }
-    cdat->tun_stream = tun_stream;
-    cdat->cancellable = g_cancellable_new ();
-    cdat->self = g_object_ref (self);
+    session->tun_stream = tun_stream;
+    session->cancellable = g_cancellable_new ();
+    session->self = g_object_ref (self);
 
-    priv->client_list = g_slist_append (priv->client_list,
-                cdat);
+    priv->session_list = g_slist_append (priv->session_list,
+                session);
 
     if (priv->use_tls) {
         g_object_unref (cert);
 
         g_tls_connection_handshake_async (G_TLS_CONNECTION (tun_stream),
-                    G_PRIORITY_DEFAULT, cdat->cancellable,
+                    G_PRIORITY_DEFAULT, session->cancellable,
                     tls_connection_handshake_async_handler,
-                    cdat);
+                    session);
     } else {
         GInputStream *tun_input = NULL;
         GInputStream *tun_bufed_input = NULL;
 
-        tun_input = g_io_stream_get_input_stream (cdat->tun_stream);
+        tun_input = g_io_stream_get_input_stream (session->tun_stream);
         tun_bufed_input = g_buffered_input_stream_new_sized (tun_input,
                     HEV_PROTO_HTTP_REQUEST_LENGTH + HEV_PROTO_HEADER_REAL_SIZE);
         g_filter_input_stream_set_close_base_stream (
@@ -686,14 +686,14 @@ socket_service_incoming_handler (GSocketService *service,
         g_buffered_input_stream_fill_async (
                     G_BUFFERED_INPUT_STREAM (tun_bufed_input),
                     HEV_PROTO_HTTP_REQUEST_LENGTH + HEV_PROTO_HEADER_REAL_SIZE,
-                    G_PRIORITY_DEFAULT, cdat->cancellable,
+                    G_PRIORITY_DEFAULT, session->cancellable,
                     buffered_input_stream_fill_async_handler,
-                    cdat);
+                    session);
     }
 
     return FALSE;
 
-cdat_fail:
+session_fail:
     g_object_unref (tun_stream);
 tun_stream_fail:
     g_object_unref (cert);
@@ -706,7 +706,7 @@ static void
 tls_connection_handshake_async_handler (GObject *source_object,
             GAsyncResult *res, gpointer user_data)
 {
-    HevServerClientData *cdat = user_data;
+    HevServerSession *session = user_data;
     GInputStream *tun_input = NULL;
     GInputStream *tun_bufed_input = NULL;
     GError *error = NULL;
@@ -720,7 +720,7 @@ tls_connection_handshake_async_handler (GObject *source_object,
         goto handshake_fail;
     }
 
-    tun_input = g_io_stream_get_input_stream (cdat->tun_stream);
+    tun_input = g_io_stream_get_input_stream (session->tun_stream);
     tun_bufed_input = g_buffered_input_stream_new_sized (tun_input,
                 HEV_PROTO_HTTP_REQUEST_LENGTH + HEV_PROTO_HEADER_REAL_SIZE);
     g_filter_input_stream_set_close_base_stream (
@@ -729,17 +729,17 @@ tls_connection_handshake_async_handler (GObject *source_object,
     g_buffered_input_stream_fill_async (
                 G_BUFFERED_INPUT_STREAM (tun_bufed_input),
                 HEV_PROTO_HTTP_REQUEST_LENGTH + HEV_PROTO_HEADER_REAL_SIZE,
-                G_PRIORITY_DEFAULT, cdat->cancellable,
+                G_PRIORITY_DEFAULT, session->cancellable,
                 buffered_input_stream_fill_async_handler,
-                cdat);
+                session);
 
     return;
 
 handshake_fail:
-    g_io_stream_close_async (cdat->tun_stream,
+    g_io_stream_close_async (session->tun_stream,
                 G_PRIORITY_DEFAULT, NULL,
                 io_stream_close_async_handler,
-                cdat);
+                session);
 
     return;
 }
@@ -748,7 +748,7 @@ static void
 buffered_input_stream_fill_async_handler (GObject *source_object,
             GAsyncResult *res, gpointer user_data)
 {
-    HevServerClientData *cdat = user_data;
+    HevServerSession *session = user_data;
     GBufferedInputStream *tun_bufed_input = NULL;
     gssize size = 0;
     gconstpointer req_buffer;
@@ -782,18 +782,18 @@ buffered_input_stream_fill_async_handler (GObject *source_object,
                     proto_header->length - HEV_PROTO_HEADER_REAL_SIZE,
                     G_PRIORITY_DEFAULT, NULL, 
                     input_stream_skip_async_handler,
-                    cdat);
+                    session);
     } else {
         GOutputStream *tun_output = NULL;
         const gchar *buffer = NULL;
         gsize count = 0;
 
-        tun_output = g_io_stream_get_output_stream (cdat->tun_stream);
+        tun_output = g_io_stream_get_output_stream (session->tun_stream);
         buffer = hev_protocol_get_invalid_message (&count);
         g_output_stream_write_async (tun_output, buffer, count,
-                    G_PRIORITY_DEFAULT, cdat->cancellable,
+                    G_PRIORITY_DEFAULT, session->cancellable,
                     invalid_output_stream_write_async_handler,
-                    cdat);
+                    session);
     }
 
     g_object_unref (tun_bufed_input);
@@ -802,10 +802,10 @@ buffered_input_stream_fill_async_handler (GObject *source_object,
 
 closed:
     g_object_unref (tun_bufed_input);
-    g_io_stream_close_async (cdat->tun_stream,
+    g_io_stream_close_async (session->tun_stream,
                 G_PRIORITY_DEFAULT, NULL,
                 io_stream_close_async_handler,
-                cdat);
+                session);
 
     return;
 }
@@ -814,24 +814,24 @@ static void
 invalid_output_stream_write_async_handler (GObject *source_object,
             GAsyncResult *res, gpointer user_data)
 {
-    HevServerClientData *cdat = user_data;
+    HevServerSession *session = user_data;
 
     g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
 
     g_output_stream_write_finish (G_OUTPUT_STREAM (source_object),
                 res, NULL);
 
-    g_io_stream_close_async (cdat->tun_stream,
+    g_io_stream_close_async (session->tun_stream,
                 G_PRIORITY_DEFAULT, NULL,
                 io_stream_close_async_handler,
-                cdat);
+                session);
 }
 
 static void
 input_stream_skip_async_handler (GObject *source_object,
             GAsyncResult *res, gpointer user_data)
 {
-    HevServerClientData *cdat = user_data;
+    HevServerSession *session = user_data;
     gssize size = 0;
     GOutputStream *tun_output = NULL;
     HevProtocolHeader *proto_header = NULL;
@@ -851,27 +851,27 @@ input_stream_skip_async_handler (GObject *source_object,
         goto closed;
     }
 
-    memcpy (cdat->res_buffer, HEV_PROTO_HTTP_RESPONSE_VALID,
+    memcpy (session->res_buffer, HEV_PROTO_HTTP_RESPONSE_VALID,
                 HEV_PROTO_HTTP_RESPONSE_VALID_LENGTH);
-    proto_header = (HevProtocolHeader *)(cdat->res_buffer +
+    proto_header = (HevProtocolHeader *)(session->res_buffer +
                 HEV_PROTO_HTTP_RESPONSE_VALID_LENGTH);
     length = g_random_int_range (HEV_PROTO_HEADER_MINN_SIZE,
                 HEV_PROTO_HEADER_MAXN_SIZE);
     hev_protocol_header_set (proto_header, length);
-    tun_output = g_io_stream_get_output_stream (cdat->tun_stream);
-    g_output_stream_write_async (tun_output, cdat->res_buffer,
+    tun_output = g_io_stream_get_output_stream (session->tun_stream);
+    g_output_stream_write_async (tun_output, session->res_buffer,
                 HEV_PROTO_HTTP_RESPONSE_VALID_LENGTH + length,
                 G_PRIORITY_DEFAULT, NULL,
                 valid_output_stream_write_async_handler,
-                cdat);
+                session);
 
     return;
 
 closed:
-    g_io_stream_close_async (cdat->tun_stream,
+    g_io_stream_close_async (session->tun_stream,
                 G_PRIORITY_DEFAULT, NULL,
                 io_stream_close_async_handler,
-                cdat);
+                session);
 
     return;
 }
@@ -880,8 +880,8 @@ static void
 valid_output_stream_write_async_handler (GObject *source_object,
             GAsyncResult *res, gpointer user_data)
 {
-    HevServerClientData *cdat = user_data;
-    HevServerPrivate *priv = HEV_SERVER_GET_PRIVATE (cdat->self);
+    HevServerSession *session = user_data;
+    HevServerPrivate *priv = HEV_SERVER_GET_PRIVATE (session->self);
     gssize size = 0;
     GError *error = NULL;
 
@@ -898,17 +898,17 @@ valid_output_stream_write_async_handler (GObject *source_object,
     }
 
     g_socket_client_connect_to_host_async (priv->client,
-                priv->target_addr, priv->target_port, cdat->cancellable,
+                priv->target_addr, priv->target_port, session->cancellable,
                 socket_client_connect_to_host_async_handler,
-                cdat);
+                session);
 
     return;
 
 closed:
-    g_io_stream_close_async (cdat->tun_stream,
+    g_io_stream_close_async (session->tun_stream,
                 G_PRIORITY_DEFAULT, NULL,
                 io_stream_close_async_handler,
-                cdat);
+                session);
 
     return;
 }
@@ -917,7 +917,7 @@ static void
 socket_client_connect_to_host_async_handler (GObject *source_object,
             GAsyncResult *res, gpointer user_data)
 {
-    HevServerClientData *cdat = user_data;
+    HevServerSession *session = user_data;
     GSocketConnection *conn = NULL;
     GError *error = NULL;
 
@@ -930,21 +930,21 @@ socket_client_connect_to_host_async_handler (GObject *source_object,
         g_clear_error (&error);
         goto connect_fail;
     }
-    cdat->tgt_stream = G_IO_STREAM (conn);
+    session->tgt_stream = G_IO_STREAM (conn);
 
-    hev_pollable_io_stream_splice_async (cdat->tgt_stream,
-                cdat->tun_stream, G_PRIORITY_DEFAULT, NULL,
+    hev_pollable_io_stream_splice_async (session->tgt_stream,
+                session->tun_stream, G_PRIORITY_DEFAULT, NULL,
                 pollable_splice_preread_handler, pollable_splice_prewrite_handler,
-                cdat, cdat->cancellable, io_stream_splice_async_handler,
-                cdat);
+                session, session->cancellable, io_stream_splice_async_handler,
+                session);
 
     return;
 
 connect_fail:
-    g_io_stream_close_async (cdat->tun_stream,
+    g_io_stream_close_async (session->tun_stream,
                 G_PRIORITY_DEFAULT, NULL,
                 io_stream_close_async_handler,
-                cdat);
+                session);
 
     return;
 }
@@ -953,7 +953,7 @@ static void
 io_stream_splice_async_handler (GObject *source_object,
             GAsyncResult *res, gpointer user_data)
 {
-    HevServerClientData *cdat = user_data;
+    HevServerSession *session = user_data;
     GError *error = NULL;
 
     g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
@@ -963,40 +963,40 @@ io_stream_splice_async_handler (GObject *source_object,
         g_clear_error (&error);
     }
 
-    g_io_stream_close_async (cdat->tun_stream,
+    g_io_stream_close_async (session->tun_stream,
                 G_PRIORITY_DEFAULT, NULL,
                 io_stream_close_async_handler,
-                cdat);
-    g_io_stream_close_async (cdat->tgt_stream,
+                session);
+    g_io_stream_close_async (session->tgt_stream,
                 G_PRIORITY_DEFAULT, NULL,
                 io_stream_close_async_handler,
-                cdat);
+                session);
 }
 
 static void
 io_stream_close_async_handler (GObject *source_object,
             GAsyncResult *res, gpointer user_data)
 {
-    HevServerClientData *cdat = user_data;
-    HevServerPrivate *priv = HEV_SERVER_GET_PRIVATE (cdat->self);
+    HevServerSession *session = user_data;
+    HevServerPrivate *priv = HEV_SERVER_GET_PRIVATE (session->self);
 
     g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
 
     g_io_stream_close_finish (G_IO_STREAM (source_object),
                 res, NULL);
 
-    if (G_IO_STREAM (source_object) == cdat->tun_stream)
-      cdat->tun_stream = NULL;
-    else if (G_IO_STREAM (source_object) == cdat->tgt_stream)
-      cdat->tgt_stream = NULL;
+    if (G_IO_STREAM (source_object) == session->tun_stream)
+      session->tun_stream = NULL;
+    else if (G_IO_STREAM (source_object) == session->tgt_stream)
+      session->tgt_stream = NULL;
     g_object_unref (source_object);
 
-    if (!cdat->tun_stream && !cdat->tgt_stream) {
-        g_object_unref (cdat->cancellable);
-        g_object_unref (cdat->self);
-        g_slice_free (HevServerClientData, cdat);
-        priv->client_list = g_slist_remove (priv->client_list,
-                    cdat);
+    if (!session->tun_stream && !session->tgt_stream) {
+        g_object_unref (session->cancellable);
+        g_object_unref (session->self);
+        g_slice_free (HevServerSession, session);
+        priv->session_list = g_slist_remove (priv->session_list,
+                    session);
     }
 }
 
