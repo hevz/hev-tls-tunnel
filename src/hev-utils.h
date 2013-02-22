@@ -15,6 +15,8 @@
 
 G_BEGIN_DECLS
 
+typedef struct _HevSpliceThreadPool HevSpliceThreadPool;
+
 typedef void (*HevPollableIOStreamSplicePrereadFunc) (GIOStream *stream,
             gpointer data, gsize size, gpointer *buffer, gssize *len,
             gpointer user_data);
@@ -31,6 +33,13 @@ void hev_pollable_io_stream_splice_async (GIOStream *stream1,
 
 gboolean hev_pollable_io_stream_splice_finish (GAsyncResult *result,
             GError **error);
+
+HevSpliceThreadPool * hev_splice_thread_pool_new (gsize threads);
+void hev_splice_thread_pool_free (HevSpliceThreadPool *self);
+
+GMainContext * hev_splice_thread_pool_request (HevSpliceThreadPool *self);
+void hev_splice_thread_pool_release (HevSpliceThreadPool *self,
+            GMainContext *context);
 
 G_END_DECLS
 

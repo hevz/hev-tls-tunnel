@@ -45,6 +45,7 @@ struct _HevServerPrivate
 
     GSocketService *service;
     GSocketClient *client;
+    HevSpliceThreadPool *stpool;
     GSList *session_list;
     gboolean use_tls;
 
@@ -60,6 +61,7 @@ struct _HevServerSession
     GCancellable *cancellable;
 
     HevServer *self;
+    GMainContext *context;
     guint8 res_buffer[HEV_PROTO_HTTP_RESPONSE_VALID_LENGTH +
         HEV_PROTO_HEADER_MAXN_SIZE];
 };
@@ -134,6 +136,11 @@ hev_server_dispose (GObject *obj)
     if (priv->client) {
         g_object_unref (priv->client);
         priv->client = NULL;
+    }
+
+    if (priv->stpool) {
+        hev_splice_thread_pool_free (priv->stpool);
+        priv->stpool = NULL;
     }
 
     if (priv->session_list) {
@@ -400,6 +407,15 @@ async_result_run_in_thread_handler (GSimpleAsyncResult *simple,
         goto client_fail;
     }
 
+    priv->stpool = hev_splice_thread_pool_new (8);
+    if (!priv->stpool) {
+        g_simple_async_result_set_error (simple,
+                    HEV_SERVER_ERROR,
+                    HEV_SERVER_ERROR_CLIENT,
+                    "Create splice thread pool failed!");
+        goto stpool_fail;
+    }
+
     priv->use_tls = !(g_str_equal ("None", priv->cert_file) |
         g_str_equal ("None", priv->key_file));
 
@@ -409,6 +425,8 @@ async_result_run_in_thread_handler (GSimpleAsyncResult *simple,
 
     return;
 
+stpool_fail:
+    g_object_unref (priv->client);
 client_fail:
 add_addr_fail:
     g_object_unref (saddr);
@@ -918,6 +936,7 @@ socket_client_connect_to_host_async_handler (GObject *source_object,
             GAsyncResult *res, gpointer user_data)
 {
     HevServerSession *session = user_data;
+    HevServerPrivate *priv = HEV_SERVER_GET_PRIVATE (session->self);
     GSocketConnection *conn = NULL;
     GError *error = NULL;
 
@@ -932,8 +951,9 @@ socket_client_connect_to_host_async_handler (GObject *source_object,
     }
     session->tgt_stream = G_IO_STREAM (conn);
 
+    session->context = hev_splice_thread_pool_request (priv->stpool);
     hev_pollable_io_stream_splice_async (session->tgt_stream,
-                session->tun_stream, G_PRIORITY_DEFAULT, NULL,
+                session->tun_stream, G_PRIORITY_DEFAULT, session->context,
                 pollable_splice_preread_handler, pollable_splice_prewrite_handler,
                 session, session->cancellable, io_stream_splice_async_handler,
                 session);
@@ -954,6 +974,7 @@ io_stream_splice_async_handler (GObject *source_object,
             GAsyncResult *res, gpointer user_data)
 {
     HevServerSession *session = user_data;
+    HevServerPrivate *priv = HEV_SERVER_GET_PRIVATE (session->self);
     GError *error = NULL;
 
     g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
@@ -962,6 +983,7 @@ io_stream_splice_async_handler (GObject *source_object,
         g_debug ("Splice tunnel and target stream failed: %s", error->message);
         g_clear_error (&error);
     }
+    hev_splice_thread_pool_release (priv->stpool, session->context);
 
     g_io_stream_close_async (session->tun_stream,
                 G_PRIORITY_DEFAULT, NULL,

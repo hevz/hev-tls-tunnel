@@ -13,6 +13,7 @@
 #define HEV_POLLABLE_IO_STREAM_SPLICE_BUFFER_SIZE 4096
 
 typedef struct _HevPollableIOStreamSpliceData HevPollableIOStreamSpliceData;
+typedef struct _HevSpliceThread HevSpliceThread;
 
 struct _HevPollableIOStreamSpliceData
 {
@@ -39,6 +40,19 @@ struct _HevPollableIOStreamSpliceData
     gssize buffer2_size;
 };
 
+struct _HevSpliceThread
+{
+    GThread *thread;
+    GMainLoop *main_loop;
+    gsize task_count;
+};
+
+struct _HevSpliceThreadPool
+{
+    gsize threads;
+    HevSpliceThread *thread_list;
+};
+
 static void hev_pollable_io_stream_splice_data_free (HevPollableIOStreamSpliceData *data);
 static gboolean hev_pollable_io_stream_splice_stream1_input_source_handler (GObject *istream,
             gpointer user_data);
@@ -48,6 +62,19 @@ static gboolean hev_pollable_io_stream_splice_stream2_input_source_handler (GObj
             gpointer user_data);
 static gboolean hev_pollable_io_stream_splice_stream1_output_source_handler (GObject *ostream,
             gpointer user_data);
+
+static gboolean
+idle_attach_handler (gpointer user_data)
+{
+    HevPollableIOStreamSpliceData *data = user_data;
+
+    g_source_attach (data->s1i_src, data->context);
+    g_source_unref (data->s1i_src);
+    g_source_attach (data->s2i_src, data->context);
+    g_source_unref (data->s2i_src);
+
+    return G_SOURCE_REMOVE;
+}
 
 void
 hev_pollable_io_stream_splice_async (GIOStream *stream1,
@@ -89,8 +116,6 @@ hev_pollable_io_stream_splice_async (GIOStream *stream1,
                 (GSourceFunc) hev_pollable_io_stream_splice_stream1_input_source_handler,
                 g_object_ref (simple), (GDestroyNotify) g_object_unref);
     g_source_set_priority (data->s1i_src, io_priority);
-    g_source_attach (data->s1i_src, data->context);
-    g_source_unref (data->s1i_src);
 
     /* stream2 */
     istream = g_io_stream_get_input_stream (stream2);
@@ -100,8 +125,12 @@ hev_pollable_io_stream_splice_async (GIOStream *stream1,
                 (GSourceFunc) hev_pollable_io_stream_splice_stream2_input_source_handler,
                 g_object_ref (simple), (GDestroyNotify) g_object_unref);
     g_source_set_priority (data->s2i_src, io_priority);
-    g_source_attach (data->s2i_src, data->context);
-    g_source_unref (data->s2i_src);
+
+    /* attach in target main context */
+    GSource *src = g_idle_source_new ();
+    g_source_set_callback (src, idle_attach_handler, data, NULL);
+    g_source_attach (src, context);
+    g_source_unref (src);
 
     g_object_unref (simple);
 }
@@ -185,7 +214,7 @@ hev_pollable_io_stream_splice_stream1_input_source_handler (GObject *istream,
 fail:
     if (error)
       g_simple_async_result_take_error (simple, error);
-    g_simple_async_result_complete (simple);
+    g_simple_async_result_complete_in_idle (simple);
     if (data->s2i_src) {
         g_source_destroy (data->s2i_src);
         data->s2i_src = NULL;
@@ -260,7 +289,7 @@ hev_pollable_io_stream_splice_stream2_output_source_handler (GObject *ostream,
 fail:
     if (error)
       g_simple_async_result_take_error (simple, error);
-    g_simple_async_result_complete (simple);
+    g_simple_async_result_complete_in_idle (simple);
     if (data->s2i_src) {
         g_source_destroy (data->s2i_src);
         data->s2i_src = NULL;
@@ -327,7 +356,7 @@ hev_pollable_io_stream_splice_stream2_input_source_handler (GObject *istream,
 fail:
     if (error)
       g_simple_async_result_take_error (simple, error);
-    g_simple_async_result_complete (simple);
+    g_simple_async_result_complete_in_idle (simple);
     if (data->s1i_src) {
         g_source_destroy (data->s1i_src);
         data->s1i_src = NULL;
@@ -402,7 +431,7 @@ hev_pollable_io_stream_splice_stream1_output_source_handler (GObject *ostream,
 fail:
     if (error)
       g_simple_async_result_take_error (simple, error);
-    g_simple_async_result_complete (simple);
+    g_simple_async_result_complete_in_idle (simple);
     if (data->s1i_src) {
         g_source_destroy (data->s1i_src);
         data->s1i_src = NULL;
@@ -415,5 +444,119 @@ fail:
 remove:
     data->s1o_src = NULL;
     return G_SOURCE_REMOVE;
+}
+
+HevSpliceThreadPool *
+hev_splice_thread_pool_new (gsize threads)
+{
+    HevSpliceThreadPool *self = NULL;
+    gsize i = 0;
+
+    g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
+
+    self = g_slice_new0 (HevSpliceThreadPool);
+    if (!self)
+      goto self_fail;
+    self->threads = threads;
+    self->thread_list = g_slice_alloc0 (sizeof (HevSpliceThread) * threads);
+    if (!self->thread_list)
+      goto thread_list_fail;
+    for (i=0; i<threads; i++) {
+        GMainContext *context = NULL;
+
+        context = g_main_context_new ();
+        self->thread_list[i].main_loop = g_main_loop_new (context, FALSE);
+        g_main_context_unref (context);
+        
+        self->thread_list[i].thread = g_thread_try_new ("splice worker",
+                    (GThreadFunc) g_main_loop_run, self->thread_list[i].main_loop,
+                    NULL);
+        if (!self->thread_list[i].main_loop ||
+                    !self->thread_list[i].thread)
+          goto threads_fail;
+    }
+
+    return self;
+
+threads_fail:
+    for (i=0; i<threads; i++) {
+        if (self->thread_list[i].main_loop) {
+            if (self->thread_list[i].thread) {
+                g_main_loop_quit (self->thread_list[i].main_loop);
+                g_thread_join (self->thread_list[i].thread);
+            }
+            g_main_loop_unref (self->thread_list[i].main_loop);
+        }
+    }
+    g_slice_free1 (sizeof (HevSpliceThread) * threads, self->thread_list);
+thread_list_fail:
+    g_slice_free (HevSpliceThreadPool, self);
+self_fail:
+    return NULL;
+}
+
+void
+hev_splice_thread_pool_free (HevSpliceThreadPool *self)
+{
+    gsize i = 0;
+
+    g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
+
+    g_return_if_fail (NULL != self);
+
+    for (i=0; i<self->threads; i++) {
+        if (self->thread_list[i].main_loop) {
+            if (self->thread_list[i].thread) {
+                g_main_loop_quit (self->thread_list[i].main_loop);
+                g_thread_join (self->thread_list[i].thread);
+            }
+            g_main_loop_unref (self->thread_list[i].main_loop);
+        }
+    }
+    g_slice_free1 (sizeof (HevSpliceThread) * self->threads, self->thread_list);
+
+    g_slice_free (HevSpliceThreadPool, self);
+}
+
+GMainContext *
+hev_splice_thread_pool_request (HevSpliceThreadPool *self)
+{
+    gsize i = 0, j = 0, count = 0;
+
+    g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
+
+    g_return_val_if_fail (NULL != self, NULL);
+
+    count = self->thread_list[0].task_count;
+    for (i=1; i<self->threads; i++) {
+        if (self->thread_list[i].task_count <= count) {
+            j = i;
+            count = self->thread_list[i].task_count;
+        }
+    }
+
+    self->thread_list[j].task_count ++;
+    return g_main_loop_get_context (self->thread_list[j].main_loop);
+}
+
+void
+hev_splice_thread_pool_release (HevSpliceThreadPool *self,
+            GMainContext *context)
+{
+    gsize i = 0;
+
+    g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
+
+    g_return_if_fail (NULL != self);
+
+    for (i=0; i<self->threads; i++) {
+        GMainContext *ctx = NULL;
+
+        ctx = g_main_loop_get_context (self->thread_list[i].main_loop);
+        if (ctx == context) {
+            self->thread_list[i].task_count --;
+            break;
+        }
+    }
 }
 
