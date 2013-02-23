@@ -214,7 +214,7 @@ hev_pollable_io_stream_splice_stream1_input_source_handler (GObject *istream,
 fail:
     if (error)
       g_simple_async_result_take_error (simple, error);
-    g_simple_async_result_complete_in_idle (simple);
+    simple = g_object_ref (simple);
     if (data->s2i_src) {
         g_source_destroy (data->s2i_src);
         data->s2i_src = NULL;
@@ -223,6 +223,8 @@ fail:
         g_source_destroy (data->s1o_src);
         data->s1o_src = NULL;
     }
+    g_simple_async_result_complete_in_idle (simple);
+    g_object_unref (simple);
 
 remove:
     data->s1i_src = NULL;
@@ -289,7 +291,7 @@ hev_pollable_io_stream_splice_stream2_output_source_handler (GObject *ostream,
 fail:
     if (error)
       g_simple_async_result_take_error (simple, error);
-    g_simple_async_result_complete_in_idle (simple);
+    simple = g_object_ref (simple);
     if (data->s2i_src) {
         g_source_destroy (data->s2i_src);
         data->s2i_src = NULL;
@@ -298,6 +300,8 @@ fail:
         g_source_destroy (data->s1o_src);
         data->s1o_src = NULL;
     }
+    g_simple_async_result_complete_in_idle (simple);
+    g_object_unref (simple);
 
 remove:
     data->s2o_src = NULL;
@@ -356,7 +360,7 @@ hev_pollable_io_stream_splice_stream2_input_source_handler (GObject *istream,
 fail:
     if (error)
       g_simple_async_result_take_error (simple, error);
-    g_simple_async_result_complete_in_idle (simple);
+    simple = g_object_ref (simple);
     if (data->s1i_src) {
         g_source_destroy (data->s1i_src);
         data->s1i_src = NULL;
@@ -365,6 +369,8 @@ fail:
         g_source_destroy (data->s2o_src);
         data->s2o_src = NULL;
     }
+    g_simple_async_result_complete_in_idle (simple);
+    g_object_unref (simple);
 
 remove:
     data->s2i_src = NULL;
@@ -431,7 +437,7 @@ hev_pollable_io_stream_splice_stream1_output_source_handler (GObject *ostream,
 fail:
     if (error)
       g_simple_async_result_take_error (simple, error);
-    g_simple_async_result_complete_in_idle (simple);
+    simple = g_object_ref (simple);
     if (data->s1i_src) {
         g_source_destroy (data->s1i_src);
         data->s1i_src = NULL;
@@ -440,6 +446,8 @@ fail:
         g_source_destroy (data->s2o_src);
         data->s2o_src = NULL;
     }
+    g_simple_async_result_complete_in_idle (simple);
+    g_object_unref (simple);
 
 remove:
     data->s1o_src = NULL;
