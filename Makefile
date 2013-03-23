@@ -1,8 +1,8 @@
 # Makefile for hev-tls-tunnel
  
 PP=cpp
-CC=gcc
-CCFLAGS=-g -Werror -Wall `pkg-config --cflags gio-2.0`
+CC=cc
+CCFLAGS=-O3 -Werror -Wall `pkg-config --cflags gio-2.0`
 LDFLAGS=`pkg-config --libs gio-2.0`
  
 SRCDIR=src
