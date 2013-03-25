@@ -53,3 +53,21 @@ hev_protocol_get_invalid_message (gsize *count)
     return HEV_PROTO_HTTP_RESPONSE_INVALID;
 }
 
+guint8
+hev_protocol_get_xor_byte (void)
+{
+    static gboolean init = TRUE;
+    static guint8 byte;
+
+    if (init) {
+        gint32 key = 0;
+
+        key = GINT_TO_BE (HEV_PROTO_ACTIVATE_KEY);
+        byte = ((guint8 *) &key)[0];
+
+        init = FALSE;
+    }
+
+    return byte;
+}
+

@@ -50,6 +50,7 @@ struct _HevProtocolHeader
 gboolean hev_protocol_header_set (HevProtocolHeader *self, guint32 length);
 gboolean hev_protocol_header_is_valid (const HevProtocolHeader *self);
 const gchar * hev_protocol_get_invalid_message (gsize *count);
+guint8 hev_protocol_get_xor_byte (void);
 
 #endif /* __HEV_PROTOCOL_H__ */
 
