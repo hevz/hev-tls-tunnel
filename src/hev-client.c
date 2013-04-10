@@ -480,28 +480,9 @@ pollable_splice_prewrite_handler (GIOStream *stream,
             gpointer data, gsize size, gpointer *buffer, gssize *len,
             gpointer user_data)
 {
-    guint8 *d8 = NULL, byte = 0;
-    gsize i = 0, c = 0, p = 0;
-
     g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
 
-    c = size >> 3;
-    p = c << 3;
-
-    d8 = data;
-    byte = hev_protocol_get_xor_byte ();
-    for (i=0; i<p; i+=8) {
-        d8[i+0] ^= byte;
-        d8[i+1] ^= byte;
-        d8[i+2] ^= byte;
-        d8[i+3] ^= byte;
-        d8[i+4] ^= byte;
-        d8[i+5] ^= byte;
-        d8[i+6] ^= byte;
-        d8[i+7] ^= byte;
-    }
-    for (i=p; i<size; i++)
-      d8[i] ^= byte;
+    hev_bytes_xor (data, size, hev_protocol_get_xor_byte ());
 }
 
 static gboolean

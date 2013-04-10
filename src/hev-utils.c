@@ -568,3 +568,79 @@ hev_splice_thread_pool_release (HevSpliceThreadPool *self,
     }
 }
 
+static inline void
+hev_bytes_xor_c (guint8 *data, gsize size, guint8 byte)
+{
+    gsize i = 0, c = 0, p64 = 0;
+
+    c = size >> 3;
+    p64 = c << 3;
+    for (i=0; i<p64; i+=8) {
+        data[i+0] ^= byte;
+        data[i+1] ^= byte;
+        data[i+2] ^= byte;
+        data[i+3] ^= byte;
+        data[i+4] ^= byte;
+        data[i+5] ^= byte;
+        data[i+6] ^= byte;
+        data[i+7] ^= byte;
+    }
+    for (i=p64; i<size; i++)
+      data[i] ^= byte;
+}
+
+static inline void
+hev_bytes_xor_sse (guint8 *data, gsize size, guint8 byte)
+{
+    gsize i = 0, c = 0, p128 = 0, p64 = 0;
+    guint8 bytes[16] =
+    {
+        byte, byte, byte, byte,
+        byte, byte, byte, byte,
+        byte, byte, byte, byte,
+        byte, byte, byte, byte,
+    };
+
+    c = size >> 4;
+    p128 = c << 4;
+    for (i=0; i<p128; i+=16) {
+        asm volatile (
+            "movdqa 0(%1), %%xmm0\t\n"
+            "movdqa 0(%2), %%xmm1\t\n"
+            "pxor %%xmm1, %%xmm0\t\n"
+            "movdqa %%xmm0, %0\t\n"
+            :"=m"(data[i])
+            :"r"(data+i), "r"(bytes)
+            :"%xmm0", "%xmm1"
+        );
+    }
+
+    c = (size - p128) >> 3;
+    p64 = (c << 3) + p128;
+    for (i=p128; i<p64; i+=8) {
+        asm volatile (
+            "movq 0(%1), %%xmm0\t\n"
+            "movq 0(%2), %%xmm1\t\n"
+            "pxor %%xmm1, %%xmm0\t\n"
+            "movq %%xmm0, %0\t\n"
+            :"=m"(data[i])
+            :"r"(data+i), "r"(bytes)
+            :"%xmm0", "%xmm1"
+        );
+    }
+
+    for (i=p64; i<size; i++) {
+        data[i] ^= byte;
+    }
+}
+
+void
+hev_bytes_xor (guint8 *data, gsize size, guint8 byte)
+{
+#if 1
+    hev_bytes_xor_sse (data, size, byte);
+#else
+    hev_bytes_xor_c (data, size, byte);
+#endif
+}
+

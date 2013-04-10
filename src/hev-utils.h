@@ -41,6 +41,8 @@ GMainContext * hev_splice_thread_pool_request (HevSpliceThreadPool *self);
 void hev_splice_thread_pool_release (HevSpliceThreadPool *self,
             GMainContext *context);
 
+void hev_bytes_xor (guint8 *data, gsize size, guint8 byte);
+
 G_END_DECLS
 
 #endif /* __HEV_UTILS_H__ */
