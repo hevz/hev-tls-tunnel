@@ -31,13 +31,17 @@ struct _HevPollableIOStreamSpliceData
     GSource *s2i_src;
     GSource *s1o_src;
 
-    guint8 buffer1[HEV_POLLABLE_IO_STREAM_SPLICE_BUFFER_SIZE];
-    guint8 buffer2[HEV_POLLABLE_IO_STREAM_SPLICE_BUFFER_SIZE];
+    guint8 buffer_1[HEV_POLLABLE_IO_STREAM_SPLICE_BUFFER_SIZE];
+    guint8 buffer_2[HEV_POLLABLE_IO_STREAM_SPLICE_BUFFER_SIZE];
     
+    gpointer buffer1;
     gsize buffer1_curr;
     gssize buffer1_size;
+    gssize buffer1_len;
+    gpointer buffer2;
     gsize buffer2_curr;
     gssize buffer2_size;
+    gssize buffer2_len;
 };
 
 struct _HevSpliceThread
@@ -62,6 +66,7 @@ static gboolean hev_pollable_io_stream_splice_stream2_input_source_handler (GObj
             gpointer user_data);
 static gboolean hev_pollable_io_stream_splice_stream1_output_source_handler (GObject *ostream,
             gpointer user_data);
+static inline gpointer hev_mem_align (gpointer p, gsize align);
 
 static gboolean
 idle_attach_handler (gpointer user_data)
@@ -101,6 +106,13 @@ hev_pollable_io_stream_splice_async (GIOStream *stream1,
     data->preread_callback = preread_callback;
     data->prewrite_callback = prewrite_callback;
     data->callback_data = callback_data;
+
+    data->buffer1 = hev_mem_align (data->buffer_1, 16);
+    data->buffer1_len = HEV_POLLABLE_IO_STREAM_SPLICE_BUFFER_SIZE -
+        (data->buffer1 - (gpointer) data->buffer_1);
+    data->buffer2 = hev_mem_align (data->buffer_2, 16);
+    data->buffer2_len = HEV_POLLABLE_IO_STREAM_SPLICE_BUFFER_SIZE -
+        (data->buffer2 - (gpointer) data->buffer_2);
     
     simple = g_simple_async_result_new (G_OBJECT (stream1),
                 callback, user_data, hev_pollable_io_stream_splice_async);
@@ -175,7 +187,7 @@ hev_pollable_io_stream_splice_stream1_input_source_handler (GObject *istream,
 
     if (g_pollable_input_stream_is_readable (G_POLLABLE_INPUT_STREAM (istream))) {
         gpointer buffer = data->buffer1;
-        gssize len = HEV_POLLABLE_IO_STREAM_SPLICE_BUFFER_SIZE;
+        gssize len = data->buffer1_len;
 
         data->buffer1_curr = 0;
         if (data->preread_callback)
@@ -321,7 +333,7 @@ hev_pollable_io_stream_splice_stream2_input_source_handler (GObject *istream,
 
     if (g_pollable_input_stream_is_readable (G_POLLABLE_INPUT_STREAM (istream))) {
         gpointer buffer = data->buffer2;
-        gssize len = HEV_POLLABLE_IO_STREAM_SPLICE_BUFFER_SIZE;
+        gssize len = data->buffer2_len;
 
         data->buffer2_curr = 0;
         if (data->preread_callback)
@@ -593,7 +605,7 @@ static inline void
 hev_bytes_xor_sse (guint8 *data, gsize size, guint8 byte)
 {
     gsize i = 0, c = 0, p128 = 0, p64 = 0;
-    guint8 bytes[16] =
+    guint8 __attribute__ ((aligned (16))) bytes[16] =
     {
         byte, byte, byte, byte,
         byte, byte, byte, byte,
@@ -642,5 +654,11 @@ hev_bytes_xor (guint8 *data, gsize size, guint8 byte)
 #else
     hev_bytes_xor_c (data, size, byte);
 #endif
+}
+
+static inline gpointer
+hev_mem_align (gpointer p, gsize align)
+{
+    return (gpointer) (((gsize) p + align -1) & (~(align - 1)));
 }
 
