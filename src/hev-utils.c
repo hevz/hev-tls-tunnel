@@ -602,20 +602,25 @@ hev_bytes_xor_sse (guint8 *data, gsize size, guint8 byte)
     gsize i = 0, c = 0, p128 = 0, p64 = 0;
     guint64 w = (byte << 8) | byte;
 
+    asm volatile (
+        "movq %0, %%mm0\t\n"
+        "pshufw $0x00, %%mm0, %%mm1\t\n"
+        "movq2dq %%mm1, %%xmm0\t\n"
+        "pshufd $0x00, %%xmm0, %%xmm1\t\n"
+        ::"m"(w)
+        :"%mm0", "%mm1", "%xmm0", "%xmm1"
+    );
+
     c = size >> 4;
     p128 = c << 4;
     for (i=0; i<p128; i+=16) {
         asm volatile (
-            "movq %2, %%mm0\t\n"
-            "pshufw $0x00, %%mm0, %%mm2\t\n"
-            "movq2dq %%mm2, %%xmm2\t\n"
-            "pshufd $0x00, %%xmm2, %%xmm1\t\n"
             "movdqa 0(%1), %%xmm0\t\n"
             "pxor %%xmm1, %%xmm0\t\n"
             "movdqa %%xmm0, %0\t\n"
             :"=m"(data[i])
-            :"r"(data+i), "m"(w)
-            :"%mm0", "%mm2", "%xmm0", "%xmm1", "%xmm2"
+            :"r"(data+i)
+            :"%xmm0"
         );
     }
 
@@ -623,14 +628,12 @@ hev_bytes_xor_sse (guint8 *data, gsize size, guint8 byte)
     p64 = (c << 3) + p128;
     for (i=p128; i<p64; i+=8) {
         asm volatile (
-            "movq %2, %%mm0\t\n"
-            "pshufw $0x00, %%mm0, %%mm1\t\n"
             "movq 0(%1), %%mm0\t\n"
             "pxor %%mm1, %%mm0\t\n"
             "movq %%mm0, %0\t\n"
             :"=m"(data[i])
-            :"r"(data+i), "m"(w)
-            :"%mm0", "%mm1"
+            :"r"(data+i)
+            :"%mm0"
         );
     }
 
