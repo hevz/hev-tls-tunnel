@@ -10,6 +10,12 @@
 
 #include "hev-utils.h"
 
+#ifdef USE_SSE
+#ifndef USE_MEM_ALIGN
+#define USE_MEM_ALIGN
+#endif /* !USE_MEM_ALIGN */
+#endif /* USE_SSE */
+
 #define HEV_POLLABLE_IO_STREAM_SPLICE_BUFFER_SIZE 4096
 
 typedef struct _HevPollableIOStreamSpliceData HevPollableIOStreamSpliceData;
@@ -66,7 +72,9 @@ static gboolean hev_pollable_io_stream_splice_stream2_input_source_handler (GObj
             gpointer user_data);
 static gboolean hev_pollable_io_stream_splice_stream1_output_source_handler (GObject *ostream,
             gpointer user_data);
+#ifdef USE_MEM_ALIGN
 static inline gpointer hev_mem_align (gpointer p, gsize align);
+#endif /* USE_MEM_ALIGN */
 
 static gboolean
 idle_attach_handler (gpointer user_data)
@@ -107,12 +115,19 @@ hev_pollable_io_stream_splice_async (GIOStream *stream1,
     data->prewrite_callback = prewrite_callback;
     data->callback_data = callback_data;
 
+#ifdef USE_MEM_ALIGN
     data->buffer1 = hev_mem_align (data->buffer_1, 16);
     data->buffer1_len = HEV_POLLABLE_IO_STREAM_SPLICE_BUFFER_SIZE -
         (data->buffer1 - (gpointer) data->buffer_1);
     data->buffer2 = hev_mem_align (data->buffer_2, 16);
     data->buffer2_len = HEV_POLLABLE_IO_STREAM_SPLICE_BUFFER_SIZE -
         (data->buffer2 - (gpointer) data->buffer_2);
+#else
+    data->buffer1 = data->buffer_1;
+    data->buffer1_len = HEV_POLLABLE_IO_STREAM_SPLICE_BUFFER_SIZE;
+    data->buffer2 = data->buffer_2;
+    data->buffer2_len = HEV_POLLABLE_IO_STREAM_SPLICE_BUFFER_SIZE;
+#endif /* USE_MEM_ALIGN */
     
     simple = g_simple_async_result_new (G_OBJECT (stream1),
                 callback, user_data, hev_pollable_io_stream_splice_async);
@@ -580,27 +595,7 @@ hev_splice_thread_pool_release (HevSpliceThreadPool *self,
     }
 }
 
-static inline void
-hev_bytes_xor_c (guint8 *data, gsize size, guint8 byte)
-{
-    gsize i = 0, c = 0, p64 = 0;
-
-    c = size >> 3;
-    p64 = c << 3;
-    for (i=0; i<p64; i+=8) {
-        data[i+0] ^= byte;
-        data[i+1] ^= byte;
-        data[i+2] ^= byte;
-        data[i+3] ^= byte;
-        data[i+4] ^= byte;
-        data[i+5] ^= byte;
-        data[i+6] ^= byte;
-        data[i+7] ^= byte;
-    }
-    for (i=p64; i<size; i++)
-      data[i] ^= byte;
-}
-
+#ifdef USE_SSE
 static inline void
 hev_bytes_xor_sse (guint8 *data, gsize size, guint8 byte)
 {
@@ -645,20 +640,44 @@ hev_bytes_xor_sse (guint8 *data, gsize size, guint8 byte)
         data[i] ^= byte;
     }
 }
+#else /* USE_SSE */
+static inline void
+hev_bytes_xor_c (guint8 *data, gsize size, guint8 byte)
+{
+    gsize i = 0, c = 0, p64 = 0;
+
+    c = size >> 3;
+    p64 = c << 3;
+    for (i=0; i<p64; i+=8) {
+        data[i+0] ^= byte;
+        data[i+1] ^= byte;
+        data[i+2] ^= byte;
+        data[i+3] ^= byte;
+        data[i+4] ^= byte;
+        data[i+5] ^= byte;
+        data[i+6] ^= byte;
+        data[i+7] ^= byte;
+    }
+    for (i=p64; i<size; i++)
+      data[i] ^= byte;
+}
+#endif /* !USE_SSE */
 
 void
 hev_bytes_xor (guint8 *data, gsize size, guint8 byte)
 {
-#if 1
+#ifdef USE_SSE
     hev_bytes_xor_sse (data, size, byte);
-#else
+#else /* USE_SSE */
     hev_bytes_xor_c (data, size, byte);
-#endif
+#endif /* !USE_SSE */
 }
 
+#ifdef USE_MEM_ALIGN
 static inline gpointer
 hev_mem_align (gpointer p, gsize align)
 {
     return (gpointer) (((gsize) p + align -1) & (~(align - 1)));
 }
+#endif /* USE_MEM_ALIGN */
 
