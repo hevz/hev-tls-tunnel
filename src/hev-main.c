@@ -114,7 +114,9 @@ main (int argc, char *argv[])
 
     g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
 
+#ifndef GLIB_VERSION_2_36
     g_type_init ();
+#endif
 
     context = g_option_context_new (" - A TLS tunnel");
     g_option_context_add_main_entries (context, main_entries, NULL);
