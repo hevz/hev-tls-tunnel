@@ -14,7 +14,7 @@
 #include "hev-protocol.h"
 #include "hev-utils.h"
 
-#define HEV_SERVER_TIMEOUT_SECONDS      20
+#define HEV_SERVER_TIMEOUT_SECONDS      600
 #define HEV_SERVER_TIMEOUT_MAX_COUNT    3
 
 #define HEV_SERVER_GET_PRIVATE(obj) (G_TYPE_INSTANCE_GET_PRIVATE ((obj), HEV_TYPE_SERVER, HevServerPrivate))
