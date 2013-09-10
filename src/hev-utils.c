@@ -212,6 +212,10 @@ hev_pollable_io_stream_splice_stream1_input_source_handler (GObject *istream,
                     G_POLLABLE_INPUT_STREAM (istream), buffer, len,
                     data->cancellable, &error);
         if (0 >= data->buffer1_size) {
+            if (g_error_matches (error, G_IO_ERROR, G_IO_ERROR_WOULD_BLOCK)) {
+                g_error_free (error);
+                return G_SOURCE_CONTINUE;
+            }
             goto fail;
         } else {
             GOutputStream *ostream = NULL;
@@ -284,6 +288,10 @@ hev_pollable_io_stream_splice_stream2_output_source_handler (GObject *ostream,
                     buffer, data->buffer1_size, data->cancellable,
                     &error);
         if (0 >= size) {
+            if (g_error_matches (error, G_IO_ERROR, G_IO_ERROR_WOULD_BLOCK)) {
+                g_error_free (error);
+                return G_SOURCE_CONTINUE;
+            }
             goto fail;
         } else {
             data->buffer1_curr += size;
@@ -358,6 +366,10 @@ hev_pollable_io_stream_splice_stream2_input_source_handler (GObject *istream,
                     G_POLLABLE_INPUT_STREAM (istream), buffer, len,
                     data->cancellable, &error);
         if (0 >= data->buffer2_size) {
+            if (g_error_matches (error, G_IO_ERROR, G_IO_ERROR_WOULD_BLOCK)) {
+                g_error_free (error);
+                return G_SOURCE_CONTINUE;
+            }
             goto fail;
         } else {
             GOutputStream *ostream = NULL;
@@ -430,6 +442,10 @@ hev_pollable_io_stream_splice_stream1_output_source_handler (GObject *ostream,
                     buffer, data->buffer2_size, data->cancellable,
                     &error);
         if (0 >= size) {
+            if (g_error_matches (error, G_IO_ERROR, G_IO_ERROR_WOULD_BLOCK)) {
+                g_error_free (error);
+                return G_SOURCE_CONTINUE;
+            }
             goto fail;
         } else {
             data->buffer2_curr += size;
