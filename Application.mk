@@ -15,6 +15,6 @@
 
 APP_OPTIM := release
 APP_PLATFORM := android-9
-APP_ABI := armeabi
-APP_CFLAGS := -O3
+APP_ABI := armeabi-v7a
+APP_CFLAGS := -O3 -mfpu=neon -DUSE_NEON
 NDK_TOOLCHAIN_VERSION := 4.8

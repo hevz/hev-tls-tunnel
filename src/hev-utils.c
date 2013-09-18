@@ -8,13 +8,17 @@
  ============================================================================
  */
 
+#if defined(USE_NEON)
+#include <arm_neon.h>
+#endif /* USE_NEON */
+
 #include "hev-utils.h"
 
-#ifdef USE_SSE
+#if defined(USE_SSE) || defined(USE_NEON)
 #ifndef USE_MEM_ALIGN
 #define USE_MEM_ALIGN
 #endif /* !USE_MEM_ALIGN */
-#endif /* USE_SSE */
+#endif /* USE_SSE | USE_NEON */
 
 #define HEV_POLLABLE_IO_STREAM_SPLICE_BUFFER_SIZE 4096
 
@@ -611,7 +615,7 @@ hev_splice_thread_pool_release (HevSpliceThreadPool *self,
     }
 }
 
-#ifdef USE_SSE
+#if defined(USE_SSE)
 static inline void
 hev_bytes_xor_sse (guint8 *data, gsize size, guint8 byte)
 {
@@ -657,7 +661,33 @@ hev_bytes_xor_sse (guint8 *data, gsize size, guint8 byte)
         data[i] ^= byte;
     }
 }
-#else /* USE_SSE */
+#elif defined(USE_NEON) /* !USE_SSE & USE_NEON */
+static inline void
+hev_bytes_xor_neon (guint8 *data, gsize size, guint8 byte)
+{
+    gsize i = 0, c = 0, p128 = 0, p64 = 0;
+    uint8x8_t w = vdup_n_u8 (byte);
+    uint8x16_t q = vdupq_n_u8 (byte);
+
+    c = size >> 4;
+    p128 = c << 4;
+    for (i=0; i<p128; i+=16) {
+        uint8x16_t *p = (uint8x16_t *) &data[i];
+        *p = veorq_u8 (*p, q);
+    }
+
+    c = (size - p128) >> 3;
+    p64 = (c << 3) + p128;
+    for (i=p128; i<p64; i+=8) {
+        uint8x8_t *p = (uint8x8_t *) &data[i];
+        *p = veor_u8 (*p, w);
+    }
+
+    for (i=p64; i<size; i++) {
+        data[i] ^= byte;
+    }
+}
+#else /* !USE_NEON & USE_C */
 static inline void
 hev_bytes_xor_c (guint8 *data, gsize size, guint8 byte)
 {
@@ -678,16 +708,18 @@ hev_bytes_xor_c (guint8 *data, gsize size, guint8 byte)
     for (i=p64; i<size; i++)
       data[i] ^= byte;
 }
-#endif /* !USE_SSE */
+#endif /* USE_C */
 
 void
 hev_bytes_xor (guint8 *data, gsize size, guint8 byte)
 {
-#ifdef USE_SSE
+#if defined(USE_SSE)
     hev_bytes_xor_sse (data, size, byte);
-#else /* USE_SSE */
+#elif defined(USE_NEON) /* !USE_SSE & USE_NEON */
+    hev_bytes_xor_neon (data, size, byte);
+#else /* !USE_NEON & USE_C */
     hev_bytes_xor_c (data, size, byte);
-#endif /* !USE_SSE */
+#endif /* USE_C */
 }
 
 #ifdef USE_MEM_ALIGN
