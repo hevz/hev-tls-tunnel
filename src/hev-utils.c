@@ -726,7 +726,7 @@ hev_bytes_xor (guint8 *data, gsize size, guint8 byte)
 static inline gpointer
 hev_mem_align (gpointer p, gsize align)
 {
-    return (gpointer) (((gsize) p + align -1) & (~(align - 1)));
+    return (gpointer) (((gsize) p + align - 1) & (~(align - 1)));
 }
 #endif /* USE_MEM_ALIGN */
 
