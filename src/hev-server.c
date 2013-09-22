@@ -407,7 +407,7 @@ async_result_run_in_thread_handler (GSimpleAsyncResult *simple,
         goto client_fail;
     }
 
-    priv->stpool = hev_splice_thread_pool_new (8);
+    priv->stpool = hev_splice_thread_pool_new (16);
     if (!priv->stpool) {
         g_simple_async_result_set_error (simple,
                     HEV_SERVER_ERROR,
