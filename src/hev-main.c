@@ -111,6 +111,7 @@ main (int argc, char *argv[])
     GOptionGroup *srv_grp = NULL;
     GOptionGroup *cli_grp = NULL;
     GError *error = NULL;
+    int retval = 0;
 
     g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
 
@@ -190,16 +191,6 @@ main (int argc, char *argv[])
         g_object_unref (worker);
     }
     g_main_loop_unref (main_loop);
-    g_free (mode);
-    g_free (target_addr);
-    g_free (listen_addr);
-    g_free (cert_file);
-    g_free (key_file);
-    g_free (server_addr);
-    g_free (local_addr);
-    g_free (ca_file);
-
-    return 0;
 
 main_loop_fail:
 option_chk_fail:
@@ -213,6 +204,6 @@ option_chk_fail:
     g_free (ca_file);
 option_fail:
     
-    return -1;
+    return retval;
 }
 
