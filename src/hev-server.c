@@ -925,6 +925,7 @@ socket_client_connect_to_host_async_handler (GObject *source_object,
 {
     HevServerSession *session = user_data;
     HevServerPrivate *priv = HEV_SERVER_GET_PRIVATE (session->self);
+    HevPollableIOStreamSplicePrewriteFunc prewrite_handler;
     GSocketConnection *conn = NULL;
     GError *error = NULL;
 
@@ -940,11 +941,11 @@ socket_client_connect_to_host_async_handler (GObject *source_object,
     session->tgt_stream = G_IO_STREAM (conn);
 
     session->context = hev_splice_thread_pool_request (priv->stpool);
+    prewrite_handler = priv->use_tls ? NULL : pollable_splice_prewrite_handler;
     hev_pollable_io_stream_splice_async (session->tgt_stream,
                 session->tun_stream, G_PRIORITY_DEFAULT, session->context,
-                pollable_splice_preread_handler, pollable_splice_prewrite_handler,
-                session, session->cancellable, io_stream_splice_async_handler,
-                session);
+                pollable_splice_preread_handler, prewrite_handler, session,
+                session->cancellable, io_stream_splice_async_handler, session);
 
     return;
 

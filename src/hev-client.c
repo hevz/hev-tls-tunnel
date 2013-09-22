@@ -698,6 +698,7 @@ input_stream_skip_async_handler (GObject *source_object,
 {
     HevClientSession *session = user_data;
     HevClientPrivate *priv = HEV_CLIENT_GET_PRIVATE (session->self);
+    HevPollableIOStreamSplicePrewriteFunc prewrite_handler;
     gssize size = 0;
     GError *error = NULL;
 
@@ -715,10 +716,11 @@ input_stream_skip_async_handler (GObject *source_object,
     }
 
     session->context = hev_splice_thread_pool_request (priv->stpool);
+    prewrite_handler = priv->use_tls ? NULL : pollable_splice_prewrite_handler;
     hev_pollable_io_stream_splice_async (session->lcl_stream,
                 session->tun_stream, G_PRIORITY_DEFAULT, session->context,
-                NULL, pollable_splice_prewrite_handler, NULL,
-                NULL, io_stream_splice_async_handler, session);
+                NULL, prewrite_handler, NULL, NULL,
+                io_stream_splice_async_handler, session);
 
     return;
 
