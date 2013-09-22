@@ -1,10 +1,10 @@
 HevTLSTunnel
 
-A simple TCP stream tunnel by TLS.
+A simple TCP stream tunnel by TLS or XOR.
 
 Requirements
     1. glib (>= 2.34.0)
-    2. glib-networking (>= 2.34.0) with gnutls (>= 3.0.0)
+    2. glib-networking (>= 2.34.0) with gnutls (>= 3.0.0) (optional)
 
 Build
     make
@@ -18,11 +18,11 @@ Run
         /opt/extra/hev-tls-tunnel/bin/hev-tls-tunnel -m server \
             -t 127.0.0.1 -i 22 \
             -l 0.0.0.0 -n 4430 \
-            -c /opt/extra/hev-tls-tunnel/cert/cert.pem \
-            -k /opt/extra/hev-tls-tunnel/cert/cert.key
+            -c /opt/extra/hev-tls-tunnel/cert/cert.pem (or None) \
+            -k /opt/extra/hev-tls-tunnel/cert/cert.key (or None)
     Client
         /opt/extra/hev-tls-tunnel/bin/hev-tls-tunnel -m client \
             -s localhost -p 4430 \
             -a 0.0.0.0 -x 8000 \
-            -r /opt/extra/hev-tls-tunnel/cert/ca.pem
+            -r /opt/extra/hev-tls-tunnel/cert/ca.pem (or None)
 
