@@ -644,16 +644,20 @@ socket_service_incoming_handler (GSocketService *service,
         cert = g_tls_certificate_new_from_files (priv->cert_file,
                     priv->key_file, &error);
         if (!cert) {
-            g_critical ("Create TLS certificate failed: %s", error->message);
-            g_clear_error (&error);
+			if (error) {
+				g_critical ("Create TLS certificate failed: %s", error->message);
+				g_clear_error (&error);
+			}
             goto cert_fail;
         }
 
         tun_stream = g_tls_server_connection_new (G_IO_STREAM (connection),
                     cert, &error);
         if (!tun_stream) {
-            g_critical ("Create TLS server connection failed: %s", error->message);
-            g_clear_error (&error);
+			if (error) {
+				g_critical ("Create TLS server connection failed: %s", error->message);
+				g_clear_error (&error);
+			}
             goto tun_stream_fail;
         }
     } else {
@@ -721,8 +725,10 @@ tls_connection_handshake_async_handler (GObject *source_object,
 
     if (!g_tls_connection_handshake_finish (G_TLS_CONNECTION (source_object),
                     res, &error)) {
-        g_critical ("TLS connection handshake failed: %s", error->message);
-        g_clear_error (&error);
+		if (error) {
+			g_critical ("TLS connection handshake failed: %s", error->message);
+			g_clear_error (&error);
+		}
         goto handshake_fail;
     }
 
@@ -769,9 +775,11 @@ buffered_input_stream_fill_async_handler (GObject *source_object,
                 res, &error);
     switch (size) {
     case -1:
-        g_critical ("Buffered input stream fill failed: %s",
-                    error->message);
-        g_clear_error (&error);
+		if (error) {
+			g_critical ("Buffered input stream fill failed: %s",
+						error->message);
+			g_clear_error (&error);
+		}
     case 0:
         goto closed;
     }
@@ -850,9 +858,11 @@ input_stream_skip_async_handler (GObject *source_object,
                 res, &error);
     switch (size) {
     case -1:
-        g_critical ("Buffered input stream fill failed: %s",
-                    error->message);
-        g_clear_error (&error);
+		if (error) {
+			g_critical ("Buffered input stream fill failed: %s",
+						error->message);
+			g_clear_error (&error);
+		}
     case 0:
         goto closed;
     }
@@ -897,8 +907,10 @@ valid_output_stream_write_async_handler (GObject *source_object,
                 res, &error);
     switch (size) {
     case -1:
-        g_critical ("Tunnel connection write failed: %s", error->message);
-        g_clear_error (&error);
+		if (error) {
+			g_critical ("Tunnel connection write failed: %s", error->message);
+			g_clear_error (&error);
+		}
     case 0:
         goto closed;
     }
@@ -934,8 +946,10 @@ socket_client_connect_to_host_async_handler (GObject *source_object,
     conn = g_socket_client_connect_to_host_finish (
                 G_SOCKET_CLIENT (source_object), res, &error);
     if (!conn) {
-        g_critical ("Connect to target host failed: %s", error->message);
-        g_clear_error (&error);
+		if (error) {
+			g_critical ("Connect to target host failed: %s", error->message);
+			g_clear_error (&error);
+		}
         goto connect_fail;
     }
     session->tgt_stream = G_IO_STREAM (conn);
@@ -969,8 +983,10 @@ io_stream_splice_async_handler (GObject *source_object,
     g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
 
     if (!hev_pollable_io_stream_splice_finish (res, &error)) {
-        g_debug ("Splice tunnel and target stream failed: %s", error->message);
-        g_clear_error (&error);
+		if (error) {
+			g_debug ("Splice tunnel and target stream failed: %s", error->message);
+			g_clear_error (&error);
+		}
     }
     hev_splice_thread_pool_release (priv->stpool, session->context);
 
