@@ -48,10 +48,14 @@ struct _HevPollableIOStreamSpliceData
     gsize buffer1_curr;
     gssize buffer1_size;
     gssize buffer1_len;
+    gboolean buffer1_preread;
+    gboolean buffer1_prewrite;
     gpointer buffer2;
     gsize buffer2_curr;
     gssize buffer2_size;
     gssize buffer2_len;
+    gboolean buffer2_preread;
+    gboolean buffer2_prewrite;
 };
 
 struct _HevSpliceThread
@@ -147,6 +151,7 @@ hev_pollable_io_stream_splice_async (GIOStream *stream1,
                 (GSourceFunc) hev_pollable_io_stream_splice_stream1_input_source_handler,
                 g_object_ref (simple), (GDestroyNotify) g_object_unref);
     g_source_set_priority (data->s1i_src, io_priority);
+    data->buffer1_preread = FALSE;
 
     /* stream2 */
     istream = g_io_stream_get_input_stream (stream2);
@@ -156,6 +161,7 @@ hev_pollable_io_stream_splice_async (GIOStream *stream1,
                 (GSourceFunc) hev_pollable_io_stream_splice_stream2_input_source_handler,
                 g_object_ref (simple), (GDestroyNotify) g_object_unref);
     g_source_set_priority (data->s2i_src, io_priority);
+    data->buffer2_preread = FALSE;
 
     /* attach in target main context */
     GSource *src = g_idle_source_new ();
@@ -209,9 +215,11 @@ hev_pollable_io_stream_splice_stream1_input_source_handler (GObject *istream,
         gssize len = data->buffer1_len;
 
         data->buffer1_curr = 0;
-        if (data->preread_callback)
-          data->preread_callback (data->stream1,
-                      buffer, len, &buffer, &len, data->callback_data);
+        if (data->preread_callback && !data->buffer1_preread) {
+            data->preread_callback (data->stream1,
+                        buffer, len, &buffer, &len, data->callback_data);
+            data->buffer1_preread = TRUE;
+        }
         data->buffer1_size = g_pollable_input_stream_read_nonblocking (
                     G_POLLABLE_INPUT_STREAM (istream), buffer, len,
                     data->cancellable, &error);
@@ -233,6 +241,7 @@ hev_pollable_io_stream_splice_stream1_input_source_handler (GObject *istream,
             g_source_set_priority (data->s2o_src, data->io_priority);
             g_source_attach (data->s2o_src, data->context);
             g_source_unref (data->s2o_src);
+            data->buffer1_prewrite = FALSE;
         }
 
         goto remove;
@@ -274,22 +283,22 @@ hev_pollable_io_stream_splice_stream2_output_source_handler (GObject *ostream,
     HevPollableIOStreamSpliceData *data =
         g_simple_async_result_get_op_res_gpointer (simple);
     GError *error = NULL;
+    gssize size = 0;
 
     g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
 
     if (g_pollable_output_stream_is_writable (G_POLLABLE_OUTPUT_STREAM (ostream))) {
-        gpointer buffer = data->buffer1;
-        gssize size = 0;
+        gpointer buffer = data->buffer1 + data->buffer1_curr;
+        gssize len = data->buffer1_size - data->buffer1_curr;
 
-        if (data->prewrite_callback)
-          data->prewrite_callback (data->stream2,
-                      buffer, data->buffer1_size,
-                      &buffer, &data->buffer1_size,
-                      data->callback_data);
-
+        if (data->prewrite_callback && !data->buffer1_prewrite) {
+            data->prewrite_callback (data->stream2,
+                        buffer, len, &buffer, &len, data->callback_data);
+            data->buffer1_prewrite = TRUE;
+        }
         size = g_pollable_output_stream_write_nonblocking (
                     G_POLLABLE_OUTPUT_STREAM (ostream),
-                    buffer, data->buffer1_size, data->cancellable,
+                    buffer, len, data->cancellable,
                     &error);
         if (0 >= size) {
             if (g_error_matches (error, G_IO_ERROR, G_IO_ERROR_WOULD_BLOCK)) {
@@ -313,6 +322,7 @@ hev_pollable_io_stream_splice_stream2_output_source_handler (GObject *ostream,
                 g_source_set_priority (data->s1i_src, data->io_priority);
                 g_source_attach (data->s1i_src, data->context);
                 g_source_unref (data->s1i_src);
+                data->buffer1_preread = FALSE;
             }
         }
 
@@ -363,9 +373,11 @@ hev_pollable_io_stream_splice_stream2_input_source_handler (GObject *istream,
         gssize len = data->buffer2_len;
 
         data->buffer2_curr = 0;
-        if (data->preread_callback)
-          data->preread_callback (data->stream2,
-                      buffer, len, &buffer, &len, data->callback_data);
+        if (data->preread_callback && !data->buffer2_preread) {
+            data->preread_callback (data->stream2,
+                        buffer, len, &buffer, &len, data->callback_data);
+            data->buffer2_preread = TRUE;
+        }
         data->buffer2_size = g_pollable_input_stream_read_nonblocking (
                     G_POLLABLE_INPUT_STREAM (istream), buffer, len,
                     data->cancellable, &error);
@@ -387,6 +399,7 @@ hev_pollable_io_stream_splice_stream2_input_source_handler (GObject *istream,
             g_source_set_priority (data->s1o_src, data->io_priority);
             g_source_attach (data->s1o_src, data->context);
             g_source_unref (data->s1o_src);
+            data->buffer2_prewrite = FALSE;
         }
 
         goto remove;
@@ -428,22 +441,22 @@ hev_pollable_io_stream_splice_stream1_output_source_handler (GObject *ostream,
     HevPollableIOStreamSpliceData *data =
         g_simple_async_result_get_op_res_gpointer (simple);
     GError *error = NULL;
+    gssize size = 0;
 
     g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
 
     if (g_pollable_output_stream_is_writable (G_POLLABLE_OUTPUT_STREAM (ostream))) {
-        gpointer buffer = data->buffer2;
-        gssize size = 0;
+        gpointer buffer = data->buffer2 + data->buffer2_curr;
+        gssize len = data->buffer2_size - data->buffer2_curr;
 
-        if (data->prewrite_callback)
-          data->prewrite_callback (data->stream1,
-                      buffer, data->buffer2_size,
-                      &buffer, &data->buffer2_size,
-                      data->callback_data);
-
+        if (data->prewrite_callback && !data->buffer2_prewrite) {
+            data->prewrite_callback (data->stream1,
+                        buffer, len, &buffer, &len, data->callback_data);
+            data->buffer2_prewrite = TRUE;
+        }
         size = g_pollable_output_stream_write_nonblocking (
                     G_POLLABLE_OUTPUT_STREAM (ostream),
-                    buffer, data->buffer2_size, data->cancellable,
+                    buffer, len, data->cancellable,
                     &error);
         if (0 >= size) {
             if (g_error_matches (error, G_IO_ERROR, G_IO_ERROR_WOULD_BLOCK)) {
@@ -467,6 +480,7 @@ hev_pollable_io_stream_splice_stream1_output_source_handler (GObject *ostream,
                 g_source_set_priority (data->s2i_src, data->io_priority);
                 g_source_attach (data->s2i_src, data->context);
                 g_source_unref (data->s2i_src);
+                data->buffer2_preread = FALSE;
             }
         }
 

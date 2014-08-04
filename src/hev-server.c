@@ -561,6 +561,9 @@ pollable_splice_prewrite_handler (GIOStream *stream,
     g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
 
     hev_bytes_xor (data, size, hev_protocol_get_xor_byte ());
+
+    *buffer = data;
+    *len = size;
 }
 
 static void
