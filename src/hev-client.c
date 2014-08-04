@@ -14,7 +14,7 @@
 #include "hev-protocol.h"
 #include "hev-utils.h"
 
-#define HEV_CLIENT_GET_PRIVATE(obj) (G_TYPE_INSTANCE_GET_PRIVATE ((obj), HEV_TYPE_CLIENT, HevClientPrivate))
+#define HEV_CLIENT_GET_PRIVATE(obj) (hev_client_get_instance_private(obj))
 
 enum
 {
@@ -86,7 +86,7 @@ static gboolean tls_connection_accept_certificate_handler (GTlsConnection *conn,
 static GParamSpec *hev_client_properties[N_PROPERTIES] = { NULL };
 
 G_DEFINE_TYPE_WITH_CODE (HevClient, hev_client, G_TYPE_OBJECT,
-        G_IMPLEMENT_INTERFACE (G_TYPE_ASYNC_INITABLE, hev_client_async_initable_iface_init));
+        G_ADD_PRIVATE (HevClient);G_IMPLEMENT_INTERFACE (G_TYPE_ASYNC_INITABLE, hev_client_async_initable_iface_init));
 
 GQuark
 hev_client_error_quark (void)
@@ -277,8 +277,6 @@ hev_client_class_init (HevClientClass *klass)
                     G_PARAM_CONSTRUCT_ONLY);
     g_object_class_install_properties (obj_class, N_PROPERTIES,
                 hev_client_properties);
-
-    g_type_class_add_private (klass, sizeof (HevClientPrivate));
 }
 
 static void

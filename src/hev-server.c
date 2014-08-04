@@ -17,7 +17,7 @@
 #define HEV_SERVER_TIMEOUT_SECONDS      600
 #define HEV_SERVER_TIMEOUT_MAX_COUNT    3
 
-#define HEV_SERVER_GET_PRIVATE(obj) (G_TYPE_INSTANCE_GET_PRIVATE ((obj), HEV_TYPE_SERVER, HevServerPrivate))
+#define HEV_SERVER_GET_PRIVATE(obj) (hev_server_get_instance_private(obj))
 
 enum
 {
@@ -104,7 +104,7 @@ static void io_stream_close_async_handler (GObject *source_object,
 static GParamSpec *hev_server_properties[N_PROPERTIES] = { NULL };
 
 G_DEFINE_TYPE_WITH_CODE (HevServer, hev_server, G_TYPE_OBJECT,
-        G_IMPLEMENT_INTERFACE (G_TYPE_ASYNC_INITABLE, hev_server_async_initable_iface_init));
+        G_ADD_PRIVATE (HevServer); G_IMPLEMENT_INTERFACE (G_TYPE_ASYNC_INITABLE, hev_server_async_initable_iface_init));
 
 GQuark
 hev_server_error_quark (void)
@@ -330,8 +330,6 @@ hev_server_class_init (HevServerClass *klass)
                     G_PARAM_CONSTRUCT_ONLY);
     g_object_class_install_properties (obj_class, N_PROPERTIES,
                 hev_server_properties);
-
-    g_type_class_add_private (klass, sizeof (HevServerPrivate));
 }
 
 static void
