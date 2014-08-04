@@ -207,53 +207,48 @@ hev_pollable_io_stream_splice_stream1_input_source_handler (GObject *istream,
     HevPollableIOStreamSpliceData *data =
         g_simple_async_result_get_op_res_gpointer (simple);
     GError *error = NULL;
+    gpointer buffer = data->buffer1;
+    gssize len = data->buffer1_len;
 
     g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
 
-    if (g_pollable_input_stream_is_readable (G_POLLABLE_INPUT_STREAM (istream))) {
-        gpointer buffer = data->buffer1;
-        gssize len = data->buffer1_len;
-
-        data->buffer1_curr = 0;
-        if (data->preread_callback && !data->buffer1_preread) {
-            data->preread_callback (data->stream1,
-                        buffer, len, &buffer, &len, data->callback_data);
-            data->buffer1_preread = TRUE;
-        }
-        data->buffer1_size = g_pollable_input_stream_read_nonblocking (
-                    G_POLLABLE_INPUT_STREAM (istream), buffer, len,
-                    data->cancellable, &error);
-        if (0 >= data->buffer1_size) {
-            if (g_error_matches (error, G_IO_ERROR, G_IO_ERROR_WOULD_BLOCK)) {
-                g_error_free (error);
-                return G_SOURCE_CONTINUE;
-            }
-            goto fail;
-        } else {
-            GOutputStream *ostream = NULL;
-
-            data->buffer1_prewrite = FALSE;
-            ostream = g_io_stream_get_output_stream (data->stream2);
-            data->s2o_src = g_pollable_output_stream_create_source (
-                        G_POLLABLE_OUTPUT_STREAM (ostream), data->cancellable);
-            g_source_set_callback (data->s2o_src,
-                        (GSourceFunc) hev_pollable_io_stream_splice_stream2_output_source_handler,
-                        g_object_ref (simple), (GDestroyNotify) g_object_unref);
-            g_source_set_priority (data->s2o_src, data->io_priority);
-            g_source_attach (data->s2o_src, data->context);
-            g_source_unref (data->s2o_src);
-        }
-
-        goto remove;
-    } else {
-        if (g_cancellable_is_cancelled (data->cancellable)) {
-            error = g_error_new (G_IO_ERROR, G_IO_ERROR_CANCELLED,
-                        "Operation was cancelled.");
-            goto fail;
-        }
+    if (g_cancellable_is_cancelled (data->cancellable)) {
+        error = g_error_new (G_IO_ERROR, G_IO_ERROR_CANCELLED,
+                    "Operation was cancelled.");
+        goto fail;
     }
 
-    return G_SOURCE_CONTINUE;
+    data->buffer1_curr = 0;
+    if (data->preread_callback && !data->buffer1_preread) {
+        data->preread_callback (data->stream1,
+                    buffer, len, &buffer, &len, data->callback_data);
+        data->buffer1_preread = TRUE;
+    }
+    data->buffer1_size = g_pollable_input_stream_read_nonblocking (
+                G_POLLABLE_INPUT_STREAM (istream), buffer, len,
+                data->cancellable, &error);
+    if (0 >= data->buffer1_size) {
+        if (g_error_matches (error, G_IO_ERROR, G_IO_ERROR_WOULD_BLOCK)) {
+            g_error_free (error);
+            return G_SOURCE_CONTINUE;
+        }
+        goto fail;
+    } else {
+        GOutputStream *ostream = NULL;
+
+        data->buffer1_prewrite = FALSE;
+        ostream = g_io_stream_get_output_stream (data->stream2);
+        data->s2o_src = g_pollable_output_stream_create_source (
+                    G_POLLABLE_OUTPUT_STREAM (ostream), data->cancellable);
+        g_source_set_callback (data->s2o_src,
+                    (GSourceFunc) hev_pollable_io_stream_splice_stream2_output_source_handler,
+                    g_object_ref (simple), (GDestroyNotify) g_object_unref);
+        g_source_set_priority (data->s2o_src, data->io_priority);
+        g_source_attach (data->s2o_src, data->context);
+        g_source_unref (data->s2o_src);
+    }
+
+    goto remove;
 
 fail:
     if (error)
@@ -283,58 +278,53 @@ hev_pollable_io_stream_splice_stream2_output_source_handler (GObject *ostream,
     HevPollableIOStreamSpliceData *data =
         g_simple_async_result_get_op_res_gpointer (simple);
     GError *error = NULL;
+    gpointer buffer = data->buffer1 + data->buffer1_curr;
+    gssize size, len = data->buffer1_size - data->buffer1_curr;
 
     g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
 
-    if (g_pollable_output_stream_is_writable (G_POLLABLE_OUTPUT_STREAM (ostream))) {
-        gpointer buffer = data->buffer1 + data->buffer1_curr;
-        gssize size, len = data->buffer1_size - data->buffer1_curr;
+    if (g_cancellable_is_cancelled (data->cancellable)) {
+        error = g_error_new (G_IO_ERROR, G_IO_ERROR_CANCELLED,
+                    "Operation was cancelled.");
+        goto fail;
+    }
 
-        if (data->prewrite_callback && !data->buffer1_prewrite) {
-            data->prewrite_callback (data->stream2,
-                        buffer, len, &buffer, &len, data->callback_data);
-            data->buffer1_prewrite = TRUE;
+    if (data->prewrite_callback && !data->buffer1_prewrite) {
+        data->prewrite_callback (data->stream2,
+                    buffer, len, &buffer, &len, data->callback_data);
+        data->buffer1_prewrite = TRUE;
+    }
+    size = g_pollable_output_stream_write_nonblocking (
+                G_POLLABLE_OUTPUT_STREAM (ostream),
+                buffer, len, data->cancellable,
+                &error);
+    if (0 >= size) {
+        if (g_error_matches (error, G_IO_ERROR, G_IO_ERROR_WOULD_BLOCK)) {
+            g_error_free (error);
+            return G_SOURCE_CONTINUE;
         }
-        size = g_pollable_output_stream_write_nonblocking (
-                    G_POLLABLE_OUTPUT_STREAM (ostream),
-                    buffer, len, data->cancellable,
-                    &error);
-        if (0 >= size) {
-            if (g_error_matches (error, G_IO_ERROR, G_IO_ERROR_WOULD_BLOCK)) {
-                g_error_free (error);
-                return G_SOURCE_CONTINUE;
-            }
-            goto fail;
-        } else {
-            data->buffer1_curr += size;
-            if (data->buffer1_curr < data->buffer1_size) {
-                return G_SOURCE_CONTINUE;
-            } else {
-                GInputStream *istream = NULL;
-
-                data->buffer1_preread = FALSE;
-                istream = g_io_stream_get_input_stream (data->stream1);
-                data->s1i_src = g_pollable_input_stream_create_source (
-                            G_POLLABLE_INPUT_STREAM (istream), data->cancellable);
-                g_source_set_callback (data->s1i_src,
-                            (GSourceFunc) hev_pollable_io_stream_splice_stream1_input_source_handler,
-                            g_object_ref (simple), (GDestroyNotify) g_object_unref);
-                g_source_set_priority (data->s1i_src, data->io_priority);
-                g_source_attach (data->s1i_src, data->context);
-                g_source_unref (data->s1i_src);
-            }
-        }
-
-        goto remove;
+        goto fail;
     } else {
-        if (g_cancellable_is_cancelled (data->cancellable)) {
-            error = g_error_new (G_IO_ERROR, G_IO_ERROR_CANCELLED,
-                        "Operation was cancelled.");
-            goto fail;
+        data->buffer1_curr += size;
+        if (data->buffer1_curr < data->buffer1_size) {
+            return G_SOURCE_CONTINUE;
+        } else {
+            GInputStream *istream = NULL;
+
+            data->buffer1_preread = FALSE;
+            istream = g_io_stream_get_input_stream (data->stream1);
+            data->s1i_src = g_pollable_input_stream_create_source (
+                        G_POLLABLE_INPUT_STREAM (istream), data->cancellable);
+            g_source_set_callback (data->s1i_src,
+                        (GSourceFunc) hev_pollable_io_stream_splice_stream1_input_source_handler,
+                        g_object_ref (simple), (GDestroyNotify) g_object_unref);
+            g_source_set_priority (data->s1i_src, data->io_priority);
+            g_source_attach (data->s1i_src, data->context);
+            g_source_unref (data->s1i_src);
         }
     }
 
-    return G_SOURCE_CONTINUE;
+    goto remove;
 
 fail:
     if (error)
@@ -364,53 +354,47 @@ hev_pollable_io_stream_splice_stream2_input_source_handler (GObject *istream,
     HevPollableIOStreamSpliceData *data =
         g_simple_async_result_get_op_res_gpointer (simple);
     GError *error = NULL;
+    gpointer buffer = data->buffer2;
+    gssize len = data->buffer2_len;
 
     g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
 
-    if (g_pollable_input_stream_is_readable (G_POLLABLE_INPUT_STREAM (istream))) {
-        gpointer buffer = data->buffer2;
-        gssize len = data->buffer2_len;
-
-        data->buffer2_curr = 0;
-        if (data->preread_callback && !data->buffer2_preread) {
-            data->preread_callback (data->stream2,
-                        buffer, len, &buffer, &len, data->callback_data);
-            data->buffer2_preread = TRUE;
+    if (g_cancellable_is_cancelled (data->cancellable)) {
+        error = g_error_new (G_IO_ERROR, G_IO_ERROR_CANCELLED,
+                    "Operation was cancelled.");
+        goto fail;
+    }
+    data->buffer2_curr = 0;
+    if (data->preread_callback && !data->buffer2_preread) {
+        data->preread_callback (data->stream2,
+                    buffer, len, &buffer, &len, data->callback_data);
+        data->buffer2_preread = TRUE;
+    }
+    data->buffer2_size = g_pollable_input_stream_read_nonblocking (
+                G_POLLABLE_INPUT_STREAM (istream), buffer, len,
+                data->cancellable, &error);
+    if (0 >= data->buffer2_size) {
+        if (g_error_matches (error, G_IO_ERROR, G_IO_ERROR_WOULD_BLOCK)) {
+            g_error_free (error);
+            return G_SOURCE_CONTINUE;
         }
-        data->buffer2_size = g_pollable_input_stream_read_nonblocking (
-                    G_POLLABLE_INPUT_STREAM (istream), buffer, len,
-                    data->cancellable, &error);
-        if (0 >= data->buffer2_size) {
-            if (g_error_matches (error, G_IO_ERROR, G_IO_ERROR_WOULD_BLOCK)) {
-                g_error_free (error);
-                return G_SOURCE_CONTINUE;
-            }
-            goto fail;
-        } else {
-            GOutputStream *ostream = NULL;
-
-            data->buffer2_prewrite = FALSE;
-            ostream = g_io_stream_get_output_stream (data->stream1);
-            data->s1o_src = g_pollable_output_stream_create_source (
-                        G_POLLABLE_OUTPUT_STREAM (ostream), data->cancellable);
-            g_source_set_callback (data->s1o_src,
-                        (GSourceFunc) hev_pollable_io_stream_splice_stream1_output_source_handler,
-                        g_object_ref (simple), (GDestroyNotify) g_object_unref);
-            g_source_set_priority (data->s1o_src, data->io_priority);
-            g_source_attach (data->s1o_src, data->context);
-            g_source_unref (data->s1o_src);
-        }
-
-        goto remove;
+        goto fail;
     } else {
-        if (g_cancellable_is_cancelled (data->cancellable)) {
-            error = g_error_new (G_IO_ERROR, G_IO_ERROR_CANCELLED,
-                        "Operation was cancelled.");
-            goto fail;
-        }
+        GOutputStream *ostream = NULL;
+
+        data->buffer2_prewrite = FALSE;
+        ostream = g_io_stream_get_output_stream (data->stream1);
+        data->s1o_src = g_pollable_output_stream_create_source (
+                    G_POLLABLE_OUTPUT_STREAM (ostream), data->cancellable);
+        g_source_set_callback (data->s1o_src,
+                    (GSourceFunc) hev_pollable_io_stream_splice_stream1_output_source_handler,
+                    g_object_ref (simple), (GDestroyNotify) g_object_unref);
+        g_source_set_priority (data->s1o_src, data->io_priority);
+        g_source_attach (data->s1o_src, data->context);
+        g_source_unref (data->s1o_src);
     }
 
-    return G_SOURCE_CONTINUE;
+    goto remove;
 
 fail:
     if (error)
@@ -440,58 +424,53 @@ hev_pollable_io_stream_splice_stream1_output_source_handler (GObject *ostream,
     HevPollableIOStreamSpliceData *data =
         g_simple_async_result_get_op_res_gpointer (simple);
     GError *error = NULL;
+    gpointer buffer = data->buffer2 + data->buffer2_curr;
+    gssize size, len = data->buffer2_size - data->buffer2_curr;
 
     g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
 
-    if (g_pollable_output_stream_is_writable (G_POLLABLE_OUTPUT_STREAM (ostream))) {
-        gpointer buffer = data->buffer2 + data->buffer2_curr;
-        gssize size, len = data->buffer2_size - data->buffer2_curr;
+    if (g_cancellable_is_cancelled (data->cancellable)) {
+        error = g_error_new (G_IO_ERROR, G_IO_ERROR_CANCELLED,
+                    "Operation was cancelled.");
+        goto fail;
+    }
 
-        if (data->prewrite_callback && !data->buffer2_prewrite) {
-            data->prewrite_callback (data->stream1,
-                        buffer, len, &buffer, &len, data->callback_data);
-            data->buffer2_prewrite = TRUE;
+    if (data->prewrite_callback && !data->buffer2_prewrite) {
+        data->prewrite_callback (data->stream1,
+                    buffer, len, &buffer, &len, data->callback_data);
+        data->buffer2_prewrite = TRUE;
+    }
+    size = g_pollable_output_stream_write_nonblocking (
+                G_POLLABLE_OUTPUT_STREAM (ostream),
+                buffer, len, data->cancellable,
+                &error);
+    if (0 >= size) {
+        if (g_error_matches (error, G_IO_ERROR, G_IO_ERROR_WOULD_BLOCK)) {
+            g_error_free (error);
+            return G_SOURCE_CONTINUE;
         }
-        size = g_pollable_output_stream_write_nonblocking (
-                    G_POLLABLE_OUTPUT_STREAM (ostream),
-                    buffer, len, data->cancellable,
-                    &error);
-        if (0 >= size) {
-            if (g_error_matches (error, G_IO_ERROR, G_IO_ERROR_WOULD_BLOCK)) {
-                g_error_free (error);
-                return G_SOURCE_CONTINUE;
-            }
-            goto fail;
-        } else {
-            data->buffer2_curr += size;
-            if (data->buffer2_curr < data->buffer2_size) {
-                return G_SOURCE_CONTINUE;
-            } else {
-                GInputStream *istream = NULL;
-
-                data->buffer2_preread = FALSE;
-                istream = g_io_stream_get_input_stream (data->stream2);
-                data->s2i_src = g_pollable_input_stream_create_source (
-                            G_POLLABLE_INPUT_STREAM (istream), data->cancellable);
-                g_source_set_callback (data->s2i_src,
-                            (GSourceFunc) hev_pollable_io_stream_splice_stream2_input_source_handler,
-                            g_object_ref (simple), (GDestroyNotify) g_object_unref);
-                g_source_set_priority (data->s2i_src, data->io_priority);
-                g_source_attach (data->s2i_src, data->context);
-                g_source_unref (data->s2i_src);
-            }
-        }
-
-        goto remove;
+        goto fail;
     } else {
-        if (g_cancellable_is_cancelled (data->cancellable)) {
-            error = g_error_new (G_IO_ERROR, G_IO_ERROR_CANCELLED,
-                        "Operation was cancelled.");
-            goto fail;
+        data->buffer2_curr += size;
+        if (data->buffer2_curr < data->buffer2_size) {
+            return G_SOURCE_CONTINUE;
+        } else {
+            GInputStream *istream = NULL;
+
+            data->buffer2_preread = FALSE;
+            istream = g_io_stream_get_input_stream (data->stream2);
+            data->s2i_src = g_pollable_input_stream_create_source (
+                        G_POLLABLE_INPUT_STREAM (istream), data->cancellable);
+            g_source_set_callback (data->s2i_src,
+                        (GSourceFunc) hev_pollable_io_stream_splice_stream2_input_source_handler,
+                        g_object_ref (simple), (GDestroyNotify) g_object_unref);
+            g_source_set_priority (data->s2i_src, data->io_priority);
+            g_source_attach (data->s2i_src, data->context);
+            g_source_unref (data->s2i_src);
         }
     }
 
-    return G_SOURCE_CONTINUE;
+    goto remove;
 
 fail:
     if (error)
