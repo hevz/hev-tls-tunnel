@@ -78,10 +78,10 @@ hev_server_new_async_handler (GObject *source_object,
 
     server = hev_server_new_finish (res, &error);
     if (!server) {
-		if (error) {
-			g_critical ("Create server failed: %s", error->message);
-			g_clear_error (&error);
-		}
+        if (error) {
+            g_critical ("Create server failed: %s", error->message);
+            g_clear_error (&error);
+        }
     }
 
     worker = G_OBJECT (server);
@@ -97,10 +97,10 @@ hev_client_new_async_handler (GObject *source_object,
 
     client = hev_client_new_finish (res, &error);
     if (!client) {
-		if (error) {
-			g_critical ("Create client failed: %s", error->message);
-			g_clear_error (&error);
-		}
+        if (error) {
+            g_critical ("Create client failed: %s", error->message);
+            g_clear_error (&error);
+        }
     }
 
     worker = G_OBJECT (client);
