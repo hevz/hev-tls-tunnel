@@ -283,13 +283,12 @@ hev_pollable_io_stream_splice_stream2_output_source_handler (GObject *ostream,
     HevPollableIOStreamSpliceData *data =
         g_simple_async_result_get_op_res_gpointer (simple);
     GError *error = NULL;
-    gssize size = 0;
 
     g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
 
     if (g_pollable_output_stream_is_writable (G_POLLABLE_OUTPUT_STREAM (ostream))) {
         gpointer buffer = data->buffer1 + data->buffer1_curr;
-        gssize len = data->buffer1_size - data->buffer1_curr;
+        gssize size, len = data->buffer1_size - data->buffer1_curr;
 
         if (data->prewrite_callback && !data->buffer1_prewrite) {
             data->prewrite_callback (data->stream2,
@@ -441,13 +440,12 @@ hev_pollable_io_stream_splice_stream1_output_source_handler (GObject *ostream,
     HevPollableIOStreamSpliceData *data =
         g_simple_async_result_get_op_res_gpointer (simple);
     GError *error = NULL;
-    gssize size = 0;
 
     g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
 
     if (g_pollable_output_stream_is_writable (G_POLLABLE_OUTPUT_STREAM (ostream))) {
         gpointer buffer = data->buffer2 + data->buffer2_curr;
-        gssize len = data->buffer2_size - data->buffer2_curr;
+        gssize size, len = data->buffer2_size - data->buffer2_curr;
 
         if (data->prewrite_callback && !data->buffer2_prewrite) {
             data->prewrite_callback (data->stream1,
