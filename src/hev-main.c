@@ -73,6 +73,7 @@ static void
 hev_server_new_async_handler (GObject *source_object,
             GAsyncResult *res, gpointer user_data)
 {
+    GMainLoop *main_loop = user_data;
     HevServer *server = NULL;
     GError *error = NULL;
 
@@ -82,6 +83,8 @@ hev_server_new_async_handler (GObject *source_object,
             g_critical ("Create server failed: %s", error->message);
             g_clear_error (&error);
         }
+        g_main_loop_quit (main_loop);
+        return;
     }
 
     worker = G_OBJECT (server);
@@ -92,6 +95,7 @@ static void
 hev_client_new_async_handler (GObject *source_object,
             GAsyncResult *res, gpointer user_data)
 {
+    GMainLoop *main_loop = user_data;
     HevClient *client = NULL;
     GError *error = NULL;
 
@@ -101,6 +105,8 @@ hev_client_new_async_handler (GObject *source_object,
             g_critical ("Create client failed: %s", error->message);
             g_clear_error (&error);
         }
+        g_main_loop_quit (main_loop);
+        return;
     }
 
     worker = G_OBJECT (client);
@@ -177,12 +183,12 @@ main (int argc, char *argv[])
                     listen_addr, listen_port,
                     cert_file, key_file, NULL,
                     hev_server_new_async_handler,
-                    NULL);
+                    main_loop);
     } else if (g_str_equal (mode, "client")) {
         hev_client_new_async (server_addr, server_port,
                     local_addr, local_port, ca_file,
                     NULL, hev_client_new_async_handler,
-                    NULL);
+                    main_loop);
     }
 
     g_main_loop_run (main_loop);
