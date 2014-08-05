@@ -14,6 +14,11 @@
 #include "hev-protocol.h"
 #include "hev-utils.h"
 
+#ifdef G_OS_WIN32
+#define MAX_THREADS	(32)
+#else
+#define MAX_THREADS	(16)
+#endif
 #define HEV_SERVER_TIMEOUT_SECONDS      600
 #define HEV_SERVER_TIMEOUT_MAX_COUNT    3
 
@@ -405,7 +410,7 @@ async_result_run_in_thread_handler (GSimpleAsyncResult *simple,
         goto client_fail;
     }
 
-    priv->stpool = hev_splice_thread_pool_new (16);
+    priv->stpool = hev_splice_thread_pool_new (MAX_THREADS);
     if (!priv->stpool) {
         g_simple_async_result_set_error (simple,
                     HEV_SERVER_ERROR,
