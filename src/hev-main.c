@@ -79,10 +79,8 @@ hev_server_new_async_handler (GObject *source_object,
 
     server = hev_server_new_finish (res, &error);
     if (!server) {
-        if (error) {
-            g_critical ("Create server failed: %s", error->message);
-            g_clear_error (&error);
-        }
+        g_critical ("Create server failed: %s", error ? error->message : NULL);
+        g_clear_error (&error);
         g_main_loop_quit (main_loop);
         return;
     }
@@ -101,10 +99,8 @@ hev_client_new_async_handler (GObject *source_object,
 
     client = hev_client_new_finish (res, &error);
     if (!client) {
-        if (error) {
-            g_critical ("Create client failed: %s", error->message);
-            g_clear_error (&error);
-        }
+        g_critical ("Create client failed: %s", error ? error->message : NULL);
+        g_clear_error (&error);
         g_main_loop_quit (main_loop);
         return;
     }
@@ -142,7 +138,8 @@ main (int argc, char *argv[])
     g_option_group_add_entries (cli_grp, client_entries);
     g_option_context_add_group (context, cli_grp);
     if (!g_option_context_parse (context, &argc, &argv, &error)) {
-        g_critical ("Parse options failed!");
+        g_critical ("Parse options failed %s!", error ? error->message : NULL);
+        g_clear_error (&error);
         goto option_fail;
     }
     if (!mode || (!g_str_equal (mode, "server") &&
