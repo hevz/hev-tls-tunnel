@@ -45,7 +45,6 @@ struct _HevClientPrivate
     gchar *ca_file;
 
     GSocketService *service;
-    GSocketClient *client;
     HevTaskThreadPool *stpool;
     gboolean use_tls;
 };
@@ -56,6 +55,7 @@ struct _HevClientSession
     GIOStream *lcl_stream;
 
     HevClient *self;
+    GSocketClient *client;
     GMainContext *context;
     guint8 req_buffer[HEV_PROTO_HTTP_REQUEST_LENGTH +
         HEV_PROTO_HEADER_MAXN_SIZE];
@@ -73,6 +73,7 @@ static void pollable_splice_prewrite_handler (GIOStream *stream,
 static gboolean socket_service_incoming_handler (GSocketService *service,
             GSocketConnection *connection, GObject *source_object,
             gpointer user_data);
+static gboolean attach_task_handler (gpointer user_data);
 static void socket_client_connect_to_host_async_handler (GObject *source_object,
             GAsyncResult *res, gpointer user_data);
 static void buffered_input_stream_fill_async_handler (GObject *source_object,
@@ -85,6 +86,7 @@ static void output_stream_write_async_handler (GObject *source_object,
             GAsyncResult *res, gpointer user_data);
 static void io_stream_close_async_handler (GObject *source_object,
             GAsyncResult *res, gpointer user_data);
+static gboolean detach_task_handler (gpointer user_data);
 static gboolean tls_connection_accept_certificate_handler (GTlsConnection *conn,
             GTlsCertificate *peer_cert, GTlsCertificateFlags errors,
             gpointer user_data);
@@ -114,11 +116,6 @@ hev_client_dispose (GObject *obj)
                     self);
         g_object_unref (priv->service);
         priv->service = NULL;
-    }
-
-    if (priv->client) {
-        g_object_unref (priv->client);
-        priv->client = NULL;
     }
 
     if (priv->stpool) {
@@ -346,15 +343,6 @@ async_result_run_in_thread_handler (GSimpleAsyncResult *simple,
                 G_CALLBACK (socket_service_incoming_handler),
                 self);
 
-    priv->client = g_socket_client_new ();
-    if (!priv->client) {
-        g_simple_async_result_set_error (simple,
-                    HEV_CLIENT_ERROR,
-                    HEV_CLIENT_ERROR_CLIENT,
-                    "Create socket client failed!");
-        goto client_fail;
-    }
-
     priv->stpool = hev_task_thread_pool_new (MAX_THREADS);
     if (!priv->stpool) {
         g_simple_async_result_set_error (simple,
@@ -369,8 +357,6 @@ async_result_run_in_thread_handler (GSimpleAsyncResult *simple,
     return;
 
 stpool_fail:
-    g_object_unref (priv->client);
-client_fail:
 add_addr_fail:
     g_object_unref (saddr);
     g_object_unref (iaddr);
@@ -498,6 +484,7 @@ socket_service_incoming_handler (GSocketService *service,
     HevClient *self = HEV_CLIENT (user_data);
     HevClientPrivate *priv = HEV_CLIENT_GET_PRIVATE (self);
     HevClientSession *session = NULL;
+    GSource *source;
 
     g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
 
@@ -509,16 +496,43 @@ socket_service_incoming_handler (GSocketService *service,
     session->lcl_stream = G_IO_STREAM (g_object_ref (connection));
     session->self = g_object_ref (self);
 
-    g_socket_client_connect_to_host_async (priv->client,
-                priv->server_addr, priv->server_port, NULL,
-                socket_client_connect_to_host_async_handler,
-                session);
+    session->context = hev_task_thread_pool_request (priv->stpool);
+    source = g_idle_source_new ();
+    g_source_set_callback (source, attach_task_handler, session, NULL);
+    g_source_attach (source, session->context);
+    g_source_unref (source);
 
     return FALSE;
 
 session_fail:
 
     return FALSE;
+}
+
+static gboolean
+attach_task_handler (gpointer user_data)
+{
+    HevClientSession *session = user_data;
+    HevClientPrivate *priv = HEV_CLIENT_GET_PRIVATE (session->self);
+
+    session->client = g_socket_client_new ();
+    if (!session->client)
+      goto client_fail;
+
+    g_socket_client_connect_to_host_async (session->client,
+                priv->server_addr, priv->server_port, NULL,
+                socket_client_connect_to_host_async_handler,
+                session);
+
+    return G_SOURCE_REMOVE;
+
+client_fail:
+    g_io_stream_close_async (session->lcl_stream,
+                G_PRIORITY_DEFAULT, NULL,
+                io_stream_close_async_handler,
+                session);
+
+    return G_SOURCE_REMOVE;
 }
 
 static void
@@ -717,7 +731,6 @@ input_stream_skip_async_handler (GObject *source_object,
         goto closed;
     }
 
-    session->context = hev_task_thread_pool_request (priv->stpool);
     prewrite_handler = priv->use_tls ? NULL : pollable_splice_prewrite_handler;
     hev_pollable_io_stream_splice_async (session->lcl_stream,
                 session->tun_stream, G_PRIORITY_DEFAULT, session->context,
@@ -740,7 +753,6 @@ io_stream_splice_async_handler (GObject *source_object,
             GAsyncResult *res, gpointer user_data)
 {
     HevClientSession *session = user_data;
-    HevClientPrivate *priv = HEV_CLIENT_GET_PRIVATE (session->self);
     GError *error = NULL;
 
     g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
@@ -749,7 +761,6 @@ io_stream_splice_async_handler (GObject *source_object,
         g_debug ("Splice tunnel and server stream failed: %s", error ? error->message : NULL);
         g_clear_error (&error);
     }
-    hev_task_thread_pool_release (priv->stpool, session->context);
 
     g_io_stream_close_async (session->tun_stream,
                 G_PRIORITY_DEFAULT, NULL,
@@ -778,10 +789,22 @@ io_stream_close_async_handler (GObject *source_object,
       session->lcl_stream = NULL;
     g_object_unref (source_object);
 
-    if (!session->tun_stream && !session->lcl_stream) {
-        g_object_unref (session->self);
-        g_slice_free (HevClientSession, session);
-    }
+    if (!session->tun_stream && !session->lcl_stream)
+      g_idle_add (detach_task_handler, session);
+}
+
+static gboolean
+detach_task_handler (gpointer user_data)
+{
+    HevClientSession *session = user_data;
+    HevClientPrivate *priv = HEV_CLIENT_GET_PRIVATE (session->self);
+
+    hev_task_thread_pool_release (priv->stpool, session->context);
+    g_object_unref (session->self);
+    g_object_unref (session->client);
+    g_slice_free (HevClientSession, session);
+
+    return G_SOURCE_REMOVE;
 }
 
 static gboolean
