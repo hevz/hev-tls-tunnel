@@ -15,9 +15,9 @@
 #include "hev-utils.h"
 
 #ifdef G_OS_WIN32
-#define MAX_THREADS	(32)
+#define MAX_THREADS    (64)
 #else
-#define MAX_THREADS	(16)
+#define MAX_THREADS    (16)
 #endif
 
 #define HEV_CLIENT_GET_PRIVATE(obj) (hev_client_get_instance_private(obj))
