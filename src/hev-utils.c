@@ -492,6 +492,20 @@ remove:
     return G_SOURCE_REMOVE;
 }
 
+static gpointer
+hev_splice_thread_handler (gpointer data)
+{
+    GMainLoop *loop = data;
+    GMainContext *context;
+
+    context = g_main_loop_get_context (loop);
+    g_main_context_push_thread_default (context);
+    g_main_loop_run (loop);
+    g_main_context_pop_thread_default (context);
+
+    return NULL;
+}
+
 HevSpliceThreadPool *
 hev_splice_thread_pool_new (gsize threads)
 {
@@ -515,7 +529,7 @@ hev_splice_thread_pool_new (gsize threads)
         g_main_context_unref (context);
         
         self->thread_list[i].thread = g_thread_try_new ("splice worker",
-                    (GThreadFunc) g_main_loop_run, self->thread_list[i].main_loop,
+                    hev_splice_thread_handler, self->thread_list[i].main_loop,
                     NULL);
         if (!self->thread_list[i].main_loop ||
                     !self->thread_list[i].thread)
@@ -575,7 +589,7 @@ hev_splice_thread_pool_request (HevSpliceThreadPool *self)
 
     count = self->thread_list[0].task_count;
     for (i=1; i<self->threads; i++) {
-        if (self->thread_list[i].task_count <= count) {
+        if (self->thread_list[i].task_count < count) {
             j = i;
             count = self->thread_list[i].task_count;
         }
