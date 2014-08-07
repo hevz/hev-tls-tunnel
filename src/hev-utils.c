@@ -23,7 +23,7 @@
 #define HEV_POLLABLE_IO_STREAM_SPLICE_BUFFER_SIZE 4096
 
 typedef struct _HevPollableIOStreamSpliceData HevPollableIOStreamSpliceData;
-typedef struct _HevSpliceThread HevSpliceThread;
+typedef struct _HevTaskThread HevTaskThread;
 
 struct _HevPollableIOStreamSpliceData
 {
@@ -58,17 +58,17 @@ struct _HevPollableIOStreamSpliceData
     gboolean buffer2_prewrite;
 };
 
-struct _HevSpliceThread
+struct _HevTaskThread
 {
     GThread *thread;
     GMainLoop *main_loop;
     gsize task_count;
 };
 
-struct _HevSpliceThreadPool
+struct _HevTaskThreadPool
 {
     gsize threads;
-    HevSpliceThread *thread_list;
+    HevTaskThread *thread_list;
 };
 
 static void hev_pollable_io_stream_splice_data_free (HevPollableIOStreamSpliceData *data);
@@ -493,7 +493,7 @@ remove:
 }
 
 static gpointer
-hev_splice_thread_handler (gpointer data)
+hev_task_thread_handler (gpointer data)
 {
     GMainLoop *loop = data;
     GMainContext *context;
@@ -506,19 +506,19 @@ hev_splice_thread_handler (gpointer data)
     return NULL;
 }
 
-HevSpliceThreadPool *
-hev_splice_thread_pool_new (gsize threads)
+HevTaskThreadPool *
+hev_task_thread_pool_new (gsize threads)
 {
-    HevSpliceThreadPool *self = NULL;
+    HevTaskThreadPool *self = NULL;
     gsize i = 0;
 
     g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
 
-    self = g_slice_new0 (HevSpliceThreadPool);
+    self = g_slice_new0 (HevTaskThreadPool);
     if (!self)
       goto self_fail;
     self->threads = threads;
-    self->thread_list = g_slice_alloc0 (sizeof (HevSpliceThread) * threads);
+    self->thread_list = g_slice_alloc0 (sizeof (HevTaskThread) * threads);
     if (!self->thread_list)
       goto thread_list_fail;
     for (i=0; i<threads; i++) {
@@ -529,7 +529,7 @@ hev_splice_thread_pool_new (gsize threads)
         g_main_context_unref (context);
         
         self->thread_list[i].thread = g_thread_try_new ("splice worker",
-                    hev_splice_thread_handler, self->thread_list[i].main_loop,
+                    hev_task_thread_handler, self->thread_list[i].main_loop,
                     NULL);
         if (!self->thread_list[i].main_loop ||
                     !self->thread_list[i].thread)
@@ -548,15 +548,15 @@ threads_fail:
             g_main_loop_unref (self->thread_list[i].main_loop);
         }
     }
-    g_slice_free1 (sizeof (HevSpliceThread) * threads, self->thread_list);
+    g_slice_free1 (sizeof (HevTaskThread) * threads, self->thread_list);
 thread_list_fail:
-    g_slice_free (HevSpliceThreadPool, self);
+    g_slice_free (HevTaskThreadPool, self);
 self_fail:
     return NULL;
 }
 
 void
-hev_splice_thread_pool_free (HevSpliceThreadPool *self)
+hev_task_thread_pool_free (HevTaskThreadPool *self)
 {
     gsize i = 0;
 
@@ -573,13 +573,13 @@ hev_splice_thread_pool_free (HevSpliceThreadPool *self)
             g_main_loop_unref (self->thread_list[i].main_loop);
         }
     }
-    g_slice_free1 (sizeof (HevSpliceThread) * self->threads, self->thread_list);
+    g_slice_free1 (sizeof (HevTaskThread) * self->threads, self->thread_list);
 
-    g_slice_free (HevSpliceThreadPool, self);
+    g_slice_free (HevTaskThreadPool, self);
 }
 
 GMainContext *
-hev_splice_thread_pool_request (HevSpliceThreadPool *self)
+hev_task_thread_pool_request (HevTaskThreadPool *self)
 {
     gsize i = 0, j = 0, count = 0;
 
@@ -600,7 +600,7 @@ hev_splice_thread_pool_request (HevSpliceThreadPool *self)
 }
 
 void
-hev_splice_thread_pool_release (HevSpliceThreadPool *self,
+hev_task_thread_pool_release (HevTaskThreadPool *self,
             GMainContext *context)
 {
     gsize i = 0;

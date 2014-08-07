@@ -50,7 +50,7 @@ struct _HevServerPrivate
 
     GSocketService *service;
     GSocketClient *client;
-    HevSpliceThreadPool *stpool;
+    HevTaskThreadPool *stpool;
     GSList *session_list;
     gboolean use_tls;
 
@@ -144,7 +144,7 @@ hev_server_dispose (GObject *obj)
     }
 
     if (priv->stpool) {
-        hev_splice_thread_pool_free (priv->stpool);
+        hev_task_thread_pool_free (priv->stpool);
         priv->stpool = NULL;
     }
 
@@ -410,7 +410,7 @@ async_result_run_in_thread_handler (GSimpleAsyncResult *simple,
         goto client_fail;
     }
 
-    priv->stpool = hev_splice_thread_pool_new (MAX_THREADS);
+    priv->stpool = hev_task_thread_pool_new (MAX_THREADS);
     if (!priv->stpool) {
         g_simple_async_result_set_error (simple,
                     HEV_SERVER_ERROR,
@@ -948,7 +948,7 @@ socket_client_connect_to_host_async_handler (GObject *source_object,
     }
     session->tgt_stream = G_IO_STREAM (conn);
 
-    session->context = hev_splice_thread_pool_request (priv->stpool);
+    session->context = hev_task_thread_pool_request (priv->stpool);
     prewrite_handler = priv->use_tls ? NULL : pollable_splice_prewrite_handler;
     hev_pollable_io_stream_splice_async (session->tgt_stream,
                 session->tun_stream, G_PRIORITY_DEFAULT, session->context,
@@ -980,7 +980,7 @@ io_stream_splice_async_handler (GObject *source_object,
         g_debug ("Splice tunnel and target stream failed: %s", error ? error->message : NULL);
         g_clear_error (&error);
     }
-    hev_splice_thread_pool_release (priv->stpool, session->context);
+    hev_task_thread_pool_release (priv->stpool, session->context);
 
     g_io_stream_close_async (session->tun_stream,
                 G_PRIORITY_DEFAULT, NULL,
