@@ -37,9 +37,8 @@ gboolean hev_pollable_io_stream_splice_finish (GAsyncResult *result,
 HevTaskThreadPool * hev_task_thread_pool_new (gsize threads);
 void hev_task_thread_pool_free (HevTaskThreadPool *self);
 
-GMainContext * hev_task_thread_pool_request (HevTaskThreadPool *self);
-void hev_task_thread_pool_release (HevTaskThreadPool *self,
-            GMainContext *context);
+GMainContext * hev_task_thread_pool_request (HevTaskThreadPool *self, gsize *index);
+void hev_task_thread_pool_release (HevTaskThreadPool *self, gsize index);
 
 void hev_bytes_xor (guint8 *data, gsize size, guint8 byte);
 

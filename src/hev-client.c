@@ -57,6 +57,7 @@ struct _HevClientSession
     HevClient *self;
     GSocketClient *client;
     GMainContext *context;
+    gsize task_thread_idx;
     guint8 req_buffer[HEV_PROTO_HTTP_REQUEST_LENGTH +
         HEV_PROTO_HEADER_MAXN_SIZE];
 };
@@ -496,7 +497,8 @@ socket_service_incoming_handler (GSocketService *service,
     session->lcl_stream = G_IO_STREAM (g_object_ref (connection));
     session->self = g_object_ref (self);
 
-    session->context = hev_task_thread_pool_request (priv->stpool);
+    session->context = hev_task_thread_pool_request (priv->stpool,
+                &session->task_thread_idx);
     source = g_idle_source_new ();
     g_source_set_callback (source, attach_task_handler, session, NULL);
     g_source_attach (source, session->context);
@@ -799,7 +801,7 @@ detach_task_handler (gpointer user_data)
     HevClientSession *session = user_data;
     HevClientPrivate *priv = HEV_CLIENT_GET_PRIVATE (session->self);
 
-    hev_task_thread_pool_release (priv->stpool, session->context);
+    hev_task_thread_pool_release (priv->stpool, session->task_thread_idx);
     g_object_unref (session->self);
     g_object_unref (session->client);
     g_slice_free (HevClientSession, session);

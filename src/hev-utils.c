@@ -67,6 +67,7 @@ struct _HevTaskThread
 
 struct _HevTaskThreadPool
 {
+    gsize index;
     gsize threads;
     HevTaskThread *thread_list;
 };
@@ -566,45 +567,43 @@ hev_task_thread_pool_free (HevTaskThreadPool *self)
 }
 
 GMainContext *
-hev_task_thread_pool_request (HevTaskThreadPool *self)
+hev_task_thread_pool_request (HevTaskThreadPool *self, gsize *index)
 {
-    gsize i = 0, j = 0, count = 0;
+    gsize i;
 
     g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
 
     g_return_val_if_fail (NULL != self, NULL);
 
-    count = self->thread_list[0].task_count;
-    for (i=1; i<self->threads; i++) {
-        if (self->thread_list[i].task_count < count) {
-            j = i;
-            count = self->thread_list[i].task_count;
-        }
-    }
+#ifdef G_OS_WIN32
+    gsize j;
 
-    self->thread_list[j].task_count ++;
-    return g_main_loop_get_context (self->thread_list[j].main_loop);
+    for (j=0; j<self->threads; j++) {
+        i = self->index ++;
+        self->index %= self->threads;
+        if ((MAXIMUM_WAIT_OBJECTS >> 1) >= self->thread_list[i].task_count)
+          break;
+    }
+#else
+    i = self->index ++;
+    self->index %= self->threads;
+#endif
+
+    if (index)
+      *index = i;
+    self->thread_list[i].task_count ++;
+    return g_main_loop_get_context (self->thread_list[i].main_loop);
 }
 
 void
-hev_task_thread_pool_release (HevTaskThreadPool *self,
-            GMainContext *context)
+hev_task_thread_pool_release (HevTaskThreadPool *self, gsize index)
 {
-    gsize i = 0;
-
     g_debug ("%s:%d[%s]", __FILE__, __LINE__, __FUNCTION__);
 
     g_return_if_fail (NULL != self);
+    g_return_if_fail (index < self->threads);
 
-    for (i=0; i<self->threads; i++) {
-        GMainContext *ctx = NULL;
-
-        ctx = g_main_loop_get_context (self->thread_list[i].main_loop);
-        if (ctx == context) {
-            self->thread_list[i].task_count --;
-            break;
-        }
-    }
+    self->thread_list[index].task_count --;
 }
 
 #if defined(USE_SSE)

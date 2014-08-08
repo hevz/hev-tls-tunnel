@@ -61,12 +61,12 @@ struct _HevServerSession
     GIOStream *tun_stream;
     GIOStream *tgt_stream;
 
-    guint timeout_count;
-    GCancellable *cancellable;
-
     HevServer *self;
     GSocketClient *client;
     GMainContext *context;
+    GCancellable *cancellable;
+    gsize task_thread_idx;
+    guint timeout_count;
     guint8 res_buffer[HEV_PROTO_HTTP_RESPONSE_VALID_LENGTH +
         HEV_PROTO_HEADER_MAXN_SIZE];
 };
@@ -669,7 +669,8 @@ socket_service_incoming_handler (GSocketService *service,
     priv->session_list = g_slist_append (priv->session_list,
                 session);
 
-    session->context = hev_task_thread_pool_request (priv->stpool);
+    session->context = hev_task_thread_pool_request (priv->stpool,
+                &session->task_thread_idx);
     source = g_idle_source_new ();
     g_source_set_callback (source, attach_task_handler, session, NULL);
     g_source_attach (source, session->context);
@@ -993,7 +994,7 @@ io_stream_splice_async_handler (GObject *source_object,
         g_debug ("Splice tunnel and target stream failed: %s", error ? error->message : NULL);
         g_clear_error (&error);
     }
-    hev_task_thread_pool_release (priv->stpool, session->context);
+    hev_task_thread_pool_release (priv->stpool, session->task_thread_idx);
 
     g_io_stream_close_async (session->tun_stream,
                 G_PRIORITY_DEFAULT, NULL,
