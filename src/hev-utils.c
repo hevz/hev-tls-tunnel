@@ -84,19 +84,6 @@ static gboolean hev_pollable_io_stream_splice_stream1_output_source_handler (GOb
 static inline gpointer hev_mem_align (gpointer p, gsize align);
 #endif /* USE_MEM_ALIGN */
 
-static gboolean
-idle_attach_handler (gpointer user_data)
-{
-    HevPollableIOStreamSpliceData *data = user_data;
-
-    g_source_attach (data->s1i_src, data->context);
-    g_source_unref (data->s1i_src);
-    g_source_attach (data->s2i_src, data->context);
-    g_source_unref (data->s2i_src);
-
-    return G_SOURCE_REMOVE;
-}
-
 void
 hev_pollable_io_stream_splice_async (GIOStream *stream1,
             GIOStream *stream2, gint io_priority, GMainContext *context,
@@ -163,11 +150,11 @@ hev_pollable_io_stream_splice_async (GIOStream *stream1,
                 g_object_ref (simple), (GDestroyNotify) g_object_unref);
     g_source_set_priority (data->s2i_src, io_priority);
 
-    /* attach in target main context */
-    GSource *src = g_idle_source_new ();
-    g_source_set_callback (src, idle_attach_handler, data, NULL);
-    g_source_attach (src, context);
-    g_source_unref (src);
+    /* WARNING: Two stream sources must be attached in target main context */
+    g_source_attach (data->s1i_src, data->context);
+    g_source_unref (data->s1i_src);
+    g_source_attach (data->s2i_src, data->context);
+    g_source_unref (data->s2i_src);
 
     g_object_unref (simple);
 }
