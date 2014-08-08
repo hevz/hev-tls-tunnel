@@ -12,6 +12,13 @@
 #include <arm_neon.h>
 #endif /* USE_NEON */
 
+#include <glib.h>
+
+#ifdef G_OS_WIN32
+#define STRICT
+#include <windows.h>
+#endif
+
 #include "hev-utils.h"
 
 #if defined(USE_SSE) || defined(USE_NEON)
@@ -576,14 +583,14 @@ hev_task_thread_pool_request (HevTaskThreadPool *self, gsize *index)
     g_return_val_if_fail (NULL != self, NULL);
 
 #ifdef G_OS_WIN32
-    gsize j;
+    gsize j = 0;
 
-    for (j=0; j<self->threads; j++) {
+    do {
         i = self->index ++;
         self->index %= self->threads;
         if ((MAXIMUM_WAIT_OBJECTS >> 1) >= self->thread_list[i].task_count)
           break;
-    }
+    } while (j ++ < self->threads);
 #else
     i = self->index ++;
     self->index %= self->threads;
